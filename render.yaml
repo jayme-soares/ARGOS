@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: dani-bot
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: EORDER_USER
+        sync: false
+      - key: EORDER_PASS
+        sync: false

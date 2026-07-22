@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+debug_*.png
+seen_records.json
+.env
+.claude/
