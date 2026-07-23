@@ -761,12 +761,37 @@ def verificar_uma_vez(driver):
 
 
 def _abrir_driver():
+    # Flags de baixo consumo de memória — necessárias porque o plano free do
+    # Render dá só 512MB de RAM, e o Chromium headless "padrão" facilmente
+    # ultrapassa isso (o primeiro deploy morreu com "Ran out of memory (used
+    # over 512MB)" só de abrir o navegador). Não há garantia de que isso seja
+    # suficiente contra a grade pesada do eOrder (GWT, ~3000 registros na
+    # busca geral) — se continuar estourando memória, o próximo passo é subir
+    # de plano (Standard, 2GB RAM), não tem mais o que cortar no Chromium.
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless=new")  # ative após validar visualmente
+    options.add_argument("--headless=old")  # headless "antigo" pesa menos que o novo (=new)
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1366,900")
+    options.add_argument("--single-process")  # funde processo browser+renderer (economiza bastante RAM)
+    options.add_argument("--no-zygote")
+    options.add_argument("--window-size=1024,768")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-background-timer-throttling")
+    options.add_argument("--disable-backgrounding-occluded-windows")
+    options.add_argument("--disable-breakpad")
+    options.add_argument("--disable-component-extensions-with-background-pages")
+    options.add_argument("--disable-default-apps")
+    options.add_argument("--disable-renderer-backgrounding")
+    options.add_argument("--disable-sync")
+    options.add_argument("--disable-translate")
+    options.add_argument("--metrics-recording-only")
+    options.add_argument("--mute-audio")
+    options.add_argument("--no-first-run")
+    options.add_argument("--disk-cache-size=1")
+    options.add_argument("--renderer-process-limit=1")
+    options.add_argument("--js-flags=--max-old-space-size=192")
 
     # No Docker (Render) o Chromium/driver do sistema são apontados por
     # essas variáveis (ver Dockerfile); localmente, sem elas, o Selenium usa
