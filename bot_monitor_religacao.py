@@ -755,7 +755,15 @@ def verificar_uma_vez(driver):
     # Só notifica via push quando há religação NOVA desde a checagem
     # anterior — evita ficar reavisando, a cada ciclo, das mesmas N
     # religações que já estavam no sistema e não mudaram.
-    if ids_novos:
+    #
+    # A checagem de "not primeira_verificacao" é essencial no Render free:
+    # como o disco não é persistente, todo restart do processo (spin-down
+    # por inatividade, deploy, etc.) apaga o seen_records.json. Sem essa
+    # checagem, a primeira busca após CADA restart trataria todos os
+    # registros já existentes como "novos" e disparoria push — uma falsa
+    # notificação repetida toda vez que o serviço reinicia, mesmo sem
+    # nenhuma religação genuinamente nova ter entrado no sistema.
+    if ids_novos and estado_anterior is not None:
         enviar_notificacao_push(
             titulo="CENEGED Religação Maricá",
             mensagem=texto,
