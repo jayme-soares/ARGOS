@@ -98,6 +98,17 @@ MAX_FALHAS_CONSECUTIVAS_ANTES_DE_RECUPERAR = 3
 # o loop inteiro para sempre, sem erro nenhum no log.
 COMANDO_TIMEOUT_SEGUNDOS = 90
 
+# Watchdog de último recurso: se o processo passar esse tempo sem NENHUM
+# progresso (nenhuma chamada a _atualizar_status), ele se mata sozinho
+# (os._exit) para o Render reiniciar o container do zero. Motivo: quando o
+# chromedriver trava de verdade, o mecanismo de recuperação em
+# executar_ciclo_bot (renavegar → relogar) reaproveita o MESMO driver/sessão
+# já travada — cada tentativa de recuperação pode travar de novo pelo mesmo
+# COMANDO_TIMEOUT_SEGUNDOS, então o processo pode ficar preso por muito
+# tempo tentando se recuperar de uma sessão que não tem mais conserto. Só um
+# processo novo (driver novo, sessão nova) resolve nesse caso.
+WATCHDOG_SEM_PROGRESSO_SEGUNDOS = 8 * 60
+
 
 # ------------------------------------------------------------------
 # JANELA DE FUNCIONAMENTO (rodando na nuvem, plano free do Render)
@@ -687,12 +698,15 @@ def enviar_notificacao_push(titulo, mensagem, prioridade=3, tags=None):
 
 _status_lock = threading.Lock()
 _status = {"estado": "iniciando", "atualizado_em": None}
+_ultimo_progresso_monotonic = time.monotonic()
 
 
 def _atualizar_status(estado: str):
+    global _ultimo_progresso_monotonic
     with _status_lock:
         _status["estado"] = estado
         _status["atualizado_em"] = datetime.now(TIMEZONE).isoformat()
+        _ultimo_progresso_monotonic = time.monotonic()
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -714,6 +728,26 @@ def iniciar_servidor_saude():
     servidor = ThreadingHTTPServer(("0.0.0.0", porta), _HealthHandler)
     threading.Thread(target=servidor.serve_forever, daemon=True).start()
     print(f"[HTTP] Servidor de health-check ouvindo na porta {porta}")
+
+
+def _watchdog_loop():
+    while True:
+        time.sleep(30)
+        parado_ha = time.monotonic() - _ultimo_progresso_monotonic
+        if parado_ha > WATCHDOG_SEM_PROGRESSO_SEGUNDOS:
+            agora_str = datetime.now(TIMEZONE).strftime("%d/%m/%Y %H:%M:%S")
+            print(
+                f"[{agora_str}] [WATCHDOG] Sem nenhum progresso há {parado_ha:.0f}s "
+                f"(limite: {WATCHDOG_SEM_PROGRESSO_SEGUNDOS}s) — processo provavelmente "
+                f"preso numa sessão do Chrome travada. Encerrando à força para o Render "
+                f"reiniciar o container com uma sessão nova.",
+                flush=True,
+            )
+            os._exit(1)
+
+
+def iniciar_watchdog():
+    threading.Thread(target=_watchdog_loop, daemon=True).start()
 
 
 # ------------------------------------------------------------------
@@ -930,6 +964,7 @@ def executar_ciclo_bot():
 
 def main():
     iniciar_servidor_saude()
+    iniciar_watchdog()
     try:
         executar_ciclo_bot()
     except KeyboardInterrupt:
