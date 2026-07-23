@@ -92,6 +92,12 @@ INTERVALO_VERIFICACAO_SEGUNDOS = 60
 # vez de se recuperar sozinho — inaceitável para um bot que roda contínuo.
 MAX_FALHAS_CONSECUTIVAS_ANTES_DE_RECUPERAR = 3
 
+# Tempo máximo que um único comando Selenium (find_element, click, etc.) pode
+# levar antes de ser considerado travado e abortado com exceção. Ver
+# comentário em _abrir_driver() — sem isso, um travamento do Chromium prende
+# o loop inteiro para sempre, sem erro nenhum no log.
+COMANDO_TIMEOUT_SEGUNDOS = 90
+
 
 # ------------------------------------------------------------------
 # JANELA DE FUNCIONAMENTO (rodando na nuvem, plano free do Render)
@@ -773,8 +779,11 @@ def _abrir_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--single-process")  # funde processo browser+renderer (economiza bastante RAM)
-    options.add_argument("--no-zygote")
+    # NÃO usar --single-process: economiza RAM mas o Chromium fica instável e
+    # pode travar (deadlock) sem lançar exceção nenhuma — foi o que aconteceu
+    # em produção (health-check parou de responder, logs pararam de vez,
+    # processo preso consumindo os únicos 0.1 CPU do plano free). O comando
+    # com timeout abaixo é a segunda camada de proteção contra isso.
     options.add_argument("--window-size=1024,768")
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-background-networking")
@@ -802,8 +811,19 @@ def _abrir_driver():
 
     chromedriver_path = os.environ.get("CHROMEDRIVER_PATH")
     if chromedriver_path:
-        return webdriver.Chrome(options=options, service=ChromeService(executable_path=chromedriver_path))
-    return webdriver.Chrome(options=options)
+        driver = webdriver.Chrome(options=options, service=ChromeService(executable_path=chromedriver_path))
+    else:
+        driver = webdriver.Chrome(options=options)
+
+    # Sem isso, um comando Selenium que trave esperando o chromedriver (ex.:
+    # Chromium engasgado sob CPU throttling) bloqueia para sempre — nenhuma
+    # exceção é levantada, o loop simplesmente para de progredir e de logar,
+    # e não há como o mecanismo de recuperação em executar_ciclo_bot agir
+    # porque o próprio comando travado nunca retorna. Com o timeout, o
+    # comando falha depois de COMANDO_TIMEOUT_SEGUNDOS e vira uma exceção
+    # normal, que cai no try/except/recuperação já existente.
+    driver.command_executor.set_timeout(COMANDO_TIMEOUT_SEGUNDOS)
+    return driver
 
 
 def executar_ciclo_bot():
