@@ -2,48 +2,4 @@
 
 Bot de monitoramento das "Atividades Programáveis — CENEGED RELIGAÇÃO MARICÁ" no eOrder (Enel). Ver o cabeçalho de [`bot_monitor_religacao.py`](bot_monitor_religacao.py) para o funcionamento detalhado.
 
-## Janela de funcionamento
 
-O bot só realiza login e checagens **de segunda a sexta, das 07h às 20h (horário de Brasília)**. Fora desse período ele mantém o navegador desligado e apenas aguarda — configurável em `HORARIO_INICIO`/`HORARIO_FIM`/`TIMEZONE` no topo do script.
-
-## Rodando localmente
-
-```bash
-pip install -r requirements.txt
-export EORDER_USER='ENELINT\BR0177234757'   # PowerShell: $env:EORDER_USER = '...'
-export EORDER_PASS='sua-senha'
-python bot_monitor_religacao.py
-```
-
-Abre um servidor HTTP local (health-check) em `http://localhost:8080/` além do loop do bot.
-
-## Deploy no Render (plano free)
-
-O plano free do Render **só** tem instância gratuita para *Web Service* — background worker e cron job são pagos. Por isso o bot roda como Web Service (com um mini servidor HTTP de health-check embutido) e usa Docker para instalar o Chromium, já que o buildpack Python padrão do Render não traz navegador.
-
-1. Suba este diretório para um repositório no GitHub (o Render precisa de um repo Git).
-2. No painel do Render: **New > Web Service**, aponte para o repositório. O Render detecta o `Dockerfile` automaticamente (ou use o `render.yaml` incluso via **New > Blueprint**).
-3. Plano: **Free**.
-4. Em *Environment*, cadastre as variáveis:
-   - `EORDER_USER`
-   - `EORDER_PASS`
-5. Deploy. O serviço vai expor uma URL do tipo `https://dani-bot-xxxx.onrender.com/` — ela responde um JSON de status (`{"estado": ..., "atualizado_em": ...}`).
-
-### Por que é preciso um "ping" externo
-
-O plano free do Render **derruba o serviço após 15 minutos sem receber requisição HTTP** — e como o navegador/loop do bot rodam dentro desse mesmo processo, tudo para junto quando isso acontece. Restringir o bot ao horário 07h-20h não evita esse adormecimento sozinho: é preciso alguém batendo na URL do serviço periodicamente **durante** a janela permitida, para o Render não derrubar a instância no meio do expediente.
-
-Configure um pinger gratuito, por exemplo o [cron-job.org](https://cron-job.org):
-
-1. Crie uma conta gratuita.
-2. Novo cron job apontando para a URL do seu serviço no Render (`https://dani-bot-xxxx.onrender.com/`).
-3. Agende para rodar **a cada 10 minutos, apenas de segunda a sexta, das 07h às 20h, fuso America/Sao_Paulo** (o cron-job.org permite restringir dias da semana e faixa de horário).
-
-Fora dessa janela é esperado (e desejado) que o serviço fique dormindo — economiza as horas gratuitas do plano (750h/mês) e evita rodar fora do horário combinado.
-
-> Na primeira requisição depois de dormindo, o Render leva ~30-60s para acordar o serviço — é normal ver o primeiro ping do dia demorar um pouco mais.
-
-## Limitações conhecidas
-
-- **Estado (`seen_records.json`) é efêmero no plano free**: o Render não dá disco persistente grátis. Se o serviço reiniciar (novo deploy, ou acordar depois de ter dormido), o histórico de religações já vistas é perdido, e a checagem seguinte trata tudo que estiver na tela como "novo" (dispara notificação). Na prática, como o ping externo mantém o processo vivo ao longo de todo o expediente, isso só deve acontecer no primeiro ciclo do dia — o que é até informativo (resumo do que está pendente ao começar o dia).
-- **Login ainda não confirmado**: os seletores em `login()` são um placeholder (ver TODO no código e `debug_login_falhou.png`) — precisam ser ajustados após mapear a tela de login real do eOrder antes do bot funcionar de ponta a ponta.
