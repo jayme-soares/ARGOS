@@ -70,6 +70,10 @@ if not EORDER_USER or not EORDER_PASS:
     )
 
 SAVED_SEARCH_TEXT = "CENEGED RELIGAÇÃO MARICA"  # texto exibido no combobox (sem acento no sistema)
+# "Centro Operativo" do painel geral do Plano Diário. Passou a ser
+# obrigatório/vir vazio no eOrder — sem ele a busca geral não roda e a
+# faixa de abas (Atividades Programáveis etc.) nunca aparece.
+CENTRO_OPERATIVO_VALUE = "132"  # Valtellina - Niterói
 SAVED_SEARCH_VALUE = "52224"  # value da <option> — as opções têm espaços de padding no texto,
                                # por isso select_by_visible_text falha; usar o value é exato e estável
 
@@ -248,6 +252,16 @@ def login(driver):
 
 
 
+# Botão "Busca" dos painéis de pesquisa. O eOrder trocou a classe do botão
+# (era "butSub", passou a ser "but butAct butRO"), o que quebrou o seletor
+# antigo. Agora casa pela ação disparada no onclick ('QuerySoloInt#'), que é
+# independente de estilo; o texto "Busca" fica como alternativa.
+XPATH_BOTAO_BUSCA = (
+    "//button[contains(@onclick,'QuerySoloInt#')"
+    " or (contains(@class,'but') and contains(normalize-space(.),'Busca'))]"
+)
+
+
 def esperar_e_clicar_visivel(driver, xpath, timeout=45):
     """Espera até existir um elemento que bata com o XPath E esteja
     realmente visível/habilitado na tela, então clica nele.
@@ -349,9 +363,19 @@ def navegar_ate_atividades_programaveis(driver):
     #    o mesmo texto, e o Selenium travaria esperando um elemento oculto
     #    (de outra aba) virar visível, mesmo com o botão certo já na tela.
     try:
+        centro_el = encontrar_elemento_visivel(driver, By.NAME, "_lyAUTEID_AFIL", timeout=WAIT_TIMEOUT)
+        Select(centro_el).select_by_value(CENTRO_OPERATIVO_VALUE)
+        # O GWT recarrega o painel após trocar o centro; clicar em "Busca"
+        # antes disso faz o clique se perder (testado: 1s não bastava).
+        time.sleep(3)
+    except Exception:
+        debug_screenshot(driver, "centro_operativo_nao_encontrado")
+        raise
+
+    try:
         esperar_e_clicar_visivel(
             driver,
-            "//button[contains(@class,'butSub') and contains(normalize-space(.),'Busca')]",
+            XPATH_BOTAO_BUSCA,
             timeout=45,
         )
     except Exception:
@@ -438,7 +462,7 @@ def preencher_busca(driver, prazo_final: datetime):
     try:
         esperar_e_clicar_visivel(
             driver,
-            "//button[contains(@class,'butSub') and contains(normalize-space(.),'Busca')]",
+            XPATH_BOTAO_BUSCA,
             timeout=45,
         )
     except Exception:
