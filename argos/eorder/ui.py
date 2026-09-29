@@ -173,5 +173,18 @@ def selecionar_opcao_por_texto(driver, texto, timeout=45):
         time.sleep(0.5)
     raise TimeoutException(
         f"Opção {texto!r} não encontrada em nenhum <select> visível em {timeout}s. "
-        f"Último erro interno: {ultimo_erro}"
+        f"Opções disponíveis: {_opcoes_visiveis(driver)}. Último erro interno: {ultimo_erro}"
     )
+
+
+def _opcoes_visiveis(driver, limite=60):
+    """Textos das <option> dos selects visíveis — para a mensagem de erro
+    mostrar o nome exato cadastrado no eOrder."""
+    textos = []
+    try:
+        for sel in driver.find_elements(By.TAG_NAME, "select"):
+            if sel.is_displayed():
+                textos += [" ".join(o.text.split()) for o in sel.find_elements(By.TAG_NAME, "option") if o.text.strip()]
+    except Exception:
+        pass
+    return textos[:limite]

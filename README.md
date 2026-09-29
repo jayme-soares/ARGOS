@@ -63,7 +63,7 @@ O estado fica no volume `/data`: `programaveis.json`, `alertas.json`, `snapshot.
 pip install -r requirements.txt
 copy .env.example .env   # preencha
 # carregue as variáveis do .env no terminal, por exemplo:
-Get-Content .env | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object { $k,$v = $_ -split '=',2; Set-Item "env:$k" $v }
+Get-Content .env -Encoding UTF8 | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object { $k,$v = $_ -split '=',2; Set-Item "env:$k" $v }
 
 python -m unittest discover -s tests -t .      # testes
 

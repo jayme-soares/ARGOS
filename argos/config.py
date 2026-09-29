@@ -7,11 +7,24 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 
+def _corrigir_mojibake(texto: str) -> str:
+    """Conserta UTF-8 lido como cp1252/latin-1 ("MARICÃ\\x81" -> "MARICÁ").
+    Acontece ao carregar o .env no PowerShell sem -Encoding UTF8."""
+    if "Ã" not in texto and "Â" not in texto:
+        return texto
+    for codificacao in ("cp1252", "latin-1"):
+        try:
+            return texto.encode(codificacao).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+    return texto
+
+
 def _env_str(nome: str, padrao: str | None = None) -> str | None:
     valor = os.environ.get(nome)
     if valor is None or valor.strip() == "":
         return padrao
-    return valor.strip()
+    return _corrigir_mojibake(valor.strip())
 
 
 def _env_int(nome: str, padrao: int) -> int:
