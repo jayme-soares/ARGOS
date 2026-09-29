@@ -9,7 +9,7 @@ from argos.planilha import converter_data, ler_religas_em_campo
 
 CABECALHO = [
     "CO", "Código TdC", "Numero de Serviço", " Tipo de Serviço", "Código Cliente",
-    "Bairro", "Equipe", "Prazo ANS Legal", "Endereço Completo",
+    "Bairro", "Código Equipe", "Prazo ANS Legal", "Endereço Completo",
 ]
 LINHAS = [
     ["132", 111222333, 9000001, "RELIGACAO URGENTE", 55501.0, "Centro", "EQ MARICA 01", "29/09/2026 14:30", "Rua A, 1"],
@@ -68,7 +68,7 @@ class TestPlanilha(unittest.TestCase):
 
     def test_coluna_faltando_explica(self):
         wb = Workbook()
-        wb.active.append(["Código TdC", "Equipe"])
+        wb.active.append(["Código TdC", "Código Equipe"])
         wb.active.append([1, "EQ"])
         caminho = self.dir / "x.xlsx"
         wb.save(caminho)

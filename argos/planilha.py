@@ -11,12 +11,16 @@ Uso avulso:  python -m argos.planilha caminho/da/planilha.xls
 import io
 import re
 import sys
+import warnings
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from xml.etree import ElementTree
 
 import pandas as pd
+
+# Os exports do eOrder vêm sem estilo padrão; o openpyxl avisa a cada leitura.
+warnings.filterwarnings("ignore", message="Workbook contains no default style")
 
 from argos import config
 from argos.eorder.ui import normalizar_texto
@@ -29,7 +33,9 @@ COLUNAS = {
     "ordem": "Numero de Serviço",
     "tdc": "Código TdC",
     "cliente": "Código Cliente",
-    "equipe": "Equipe",
+    # "Código Equipe" em vez de "Equipe": na coluna Equipe o eOrder às vezes
+    # traz o nome do responsável no lugar do código da equipe.
+    "equipe": "Código Equipe",
     "bairro": "Bairro",
     "tipo": "Tipo de Serviço",
     "vencimento": "Prazo ANS Legal",
