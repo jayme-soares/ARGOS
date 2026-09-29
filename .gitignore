@@ -2,5 +2,8 @@ __pycache__/
 *.pyc
 debug_*.png
 seen_records.json
+data/
 .env
 .claude/
+web/.vercel/
+node_modules/

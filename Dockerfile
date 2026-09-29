@@ -10,13 +10,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV CHROME_BIN=/usr/bin/chromium \
     CHROMEDRIVER_PATH=/usr/bin/chromedriver \
-    PYTHONUNBUFFERED=1
+    ARGOS_DATA_DIR=/data \
+    PYTHONUNBUFFERED=1 \
+    TZ=America/Sao_Paulo
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY argos ./argos
 
-CMD ["python", "bot_monitor_religacao.py"]
+# Estado (programáveis vistos, alertas enviados), snapshot, downloads e
+# screenshots de debug. Precisa ser volume para sobreviver a restart.
+VOLUME ["/data"]
+
+CMD ["python", "-m", "argos.main"]

@@ -1,3 +1,8 @@
 selenium
 requests
 tzdata
+pandas
+openpyxl
+xlrd
+pyxlsb
+lxml

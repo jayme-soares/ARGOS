@@ -1,0 +1,20 @@
+services:
+  argos:
+    build: .
+    image: argos:latest
+    container_name: argos
+    env_file: .env
+    volumes:
+      - argos-data:/data
+    restart: unless-stopped
+    # Dois Chromes em paralelo; o /dev/shm padrão do Docker (64MB) é pouco
+    # para o Chromium mesmo com --disable-dev-shm-usage.
+    shm_size: "1gb"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  argos-data:

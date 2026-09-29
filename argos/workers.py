@@ -1,0 +1,349 @@
+"""Os dois monitores do ARGOS, cada um numa thread com seu próprio Chrome.
+
+Ficam separados porque a exportação da Busca TdC pode levar vários minutos
+(o eOrder gera o arquivo de forma assíncrona) — num Chrome só, a checagem de
+1 em 1 minuto dos programáveis ficaria parada esse tempo todo.
+
+Modo sequencial (ARGOS_MODO_SEQUENCIAL=1): se o eOrder derrubar uma sessão
+quando o mesmo usuário loga em outra, os monitores revezam o acesso via
+LOCK_EORDER, e depois de cada exportação o monitor de programáveis descarta
+a própria sessão (que o login do monitor de campo invalidou) e reloga.
+"""
+
+import contextlib
+import threading
+from datetime import datetime, timedelta
+
+from argos import config, publicador, saude
+from argos.alertas import formatar_duracao, processar_alertas
+from argos.eorder.busca_tdc import exportar_religas_em_campo
+from argos.eorder.driver import abrir_driver, fechar_driver
+from argos.eorder.programaveis import (
+    extrair_registros,
+    navegar_ate_atividades_programaveis,
+    obter_total_declarado,
+    preencher_busca,
+    proximo_dia_util,
+)
+from argos.eorder.sessao import login
+from argos.eorder.ui import debug_screenshot
+from argos.estado import carregar_json, salvar_json
+from argos.log import log
+from argos.notificacao import enviar_notificacao_push
+from argos.planilha import ler_religas_em_campo
+
+LOCK_EORDER = threading.Lock()
+_sessao_programaveis_invalidada = threading.Event()
+
+
+def dentro_da_janela_permitida(agora: datetime | None = None) -> bool:
+    agora = agora or datetime.now(config.TIMEZONE)
+    if agora.weekday() not in config.DIAS_SEMANA:
+        return False
+    return config.HORARIO_INICIO <= agora.hour < config.HORARIO_FIM
+
+
+@contextlib.contextmanager
+def _acesso_eorder(worker: str):
+    """No modo sequencial, espera a vez de usar o eOrder batendo o watchdog
+    (esperar a exportação do outro monitor não é travamento)."""
+    if not config.MODO_SEQUENCIAL:
+        yield
+        return
+    while not LOCK_EORDER.acquire(timeout=30):
+        saude.bater(worker)
+    try:
+        yield
+    finally:
+        LOCK_EORDER.release()
+
+
+def _agora() -> datetime:
+    return datetime.now(config.TIMEZONE)
+
+
+def _data_eorder_para_iso(texto: str | None) -> str | None:
+    if not texto:
+        return None
+    try:
+        return datetime.strptime(texto, "%d/%m/%Y %H:%M").replace(tzinfo=config.TIMEZONE).isoformat(timespec="minutes")
+    except ValueError:
+        return None
+
+
+# ------------------------------------------------------------------
+# PROGRAMÁVEIS
+# ------------------------------------------------------------------
+
+class MonitorProgramaveis(threading.Thread):
+    NOME = "programaveis"
+    PREFIXO = "PROGRAMÁVEIS"
+    ARQUIVO_ESTADO = "programaveis.json"
+
+    def __init__(self):
+        super().__init__(name=self.NOME, daemon=True)
+
+    def _status(self, estado):
+        saude.atualizar_status(self.NOME, estado)
+
+    def verificar_uma_vez(self, driver) -> str:
+        """Busca, extrai, compara com a checagem anterior (para saber o que é
+        novo), publica no painel e envia push só se entrou religação NOVA."""
+        agora = _agora()
+        preencher_busca(driver, proximo_dia_util(agora, dias_uteis=config.DIAS_UTEIS_PRAZO))
+
+        registros = extrair_registros(driver)
+        quantidade = obter_total_declarado(driver)
+        if quantidade is None:
+            quantidade = len(registros)
+
+        # Estado persistido no volume: um restart do container NÃO faz tudo
+        # parecer novo. None só na primeira execução de todas.
+        estado_anterior = carregar_json(self.ARQUIVO_ESTADO)
+        anteriores = (estado_anterior or {}).get("registros", {})
+        ids_novos = [r["codigo_tdc"] for r in registros if r["codigo_tdc"] not in anteriores]
+        permanecem = len(registros) - len(ids_novos)
+
+        for r in registros:
+            r["vencimento_iso"] = _data_eorder_para_iso(r.get("vencimento"))
+            r["primeiro_visto_em"] = anteriores.get(r["codigo_tdc"], {}).get("primeiro_visto_em") or agora.isoformat(timespec="seconds")
+
+        salvar_json(self.ARQUIVO_ESTADO, {
+            "quantidade_declarada": quantidade,
+            "atualizado_em": agora.isoformat(timespec="seconds"),
+            "registros": {r["codigo_tdc"]: r for r in registros},
+        })
+
+        publicador.atualizar_secao("programaveis", {
+            "atualizado_em": agora.isoformat(timespec="seconds"),
+            "total": quantidade,
+            "registros": [
+                {
+                    "tdc": r["codigo_tdc"],
+                    "ordem": r["numero_servico"],
+                    "cliente": r["codigo_cliente_medidor"],
+                    "endereco": r["endereco"],
+                    "tipo": r["tipo_servico"],
+                    "atividade": r["des_atividade"],
+                    "vencimento": r["vencimento_iso"],
+                    "primeiro_visto_em": r["primeiro_visto_em"],
+                }
+                for r in registros
+            ],
+        })
+
+        vencimentos = [r["vencimento_iso"] for r in registros if r["vencimento_iso"]]
+        venc_txt = ""
+        if vencimentos:
+            venc_txt = f" Vencimento mais próximo: {datetime.fromisoformat(min(vencimentos)):%d/%m/%Y %H:%M}."
+
+        if not quantidade:
+            return "Há 0 religações programáveis."
+        if estado_anterior is None:
+            return f"Há {quantidade} religações programáveis.{venc_txt}"
+        if not ids_novos:
+            return f"Continuam {quantidade} religações programáveis (nenhuma nova).{venc_txt}"
+
+        texto = f"Entraram {len(ids_novos)} nova(s) religação(ões) programável(is)"
+        if permanecem > 0:
+            texto += f" (as {permanecem} anteriores continuam)"
+        texto += f". Total: {quantidade}.{venc_txt}"
+
+        novos = [r for r in registros if r["codigo_tdc"] in set(ids_novos)]
+        linhas = []
+        for r in novos[:5]:
+            venc = f"vence {datetime.fromisoformat(r['vencimento_iso']):%d/%m %H:%M}" if r["vencimento_iso"] else ""
+            linhas.append("• " + " · ".join(p for p in (f"TdC {r['codigo_tdc']}", r["endereco"], venc) if p))
+        if len(novos) > 5:
+            linhas.append(f"+{len(novos) - 5} outra(s) — veja o painel.")
+        enviar_notificacao_push(
+            titulo=f"ARGOS · {len(ids_novos)} nova(s) religação(ões) programável(is)",
+            mensagem=texto + "\n" + "\n".join(linhas),
+            prioridade=4,
+            tags=["rotating_light"],
+        )
+        return texto
+
+    def run(self):
+        """Só liga o navegador dentro da janela permitida. Recuperação em 3
+        estágios após falhas seguidas: renavegar → relogar → descartar a
+        sessão (o próximo ciclo abre um Chrome novo)."""
+        driver = None
+        falhas_consecutivas = 0
+        try:
+            while True:
+                if not dentro_da_janela_permitida():
+                    if driver is not None:
+                        log("Fora do horário permitido — encerrando navegador.", self.PREFIXO)
+                        fechar_driver(driver)
+                        driver = None
+                        falhas_consecutivas = 0
+                    self._status("fora_do_horario")
+                    saude.dormir(self.NOME, config.FORA_DA_JANELA_INTERVALO_SEGUNDOS)
+                    continue
+
+                with _acesso_eorder(self.NOME):
+                    if _sessao_programaveis_invalidada.is_set():
+                        _sessao_programaveis_invalidada.clear()
+                        if driver is not None:
+                            log("Sessão invalidada pela exportação de campo — relogando.", self.PREFIXO)
+                            fechar_driver(driver)
+                            driver = None
+
+                    if driver is None:
+                        log("Iniciando navegador e login.", self.PREFIXO)
+                        self._status("iniciando_sessao")
+                        try:
+                            driver = abrir_driver()
+                            login(driver)
+                            navegar_ate_atividades_programaveis(driver)
+                        except Exception as e:
+                            log(f"Falha ao iniciar sessão: {e}", self.PREFIXO)
+                            fechar_driver(driver)
+                            driver = None
+                            self._status(f"erro_login: {e}")
+                            saude.dormir(self.NOME, config.INTERVALO_PROGRAMAVEIS_SEGUNDOS)
+                            continue
+
+                    try:
+                        texto = self.verificar_uma_vez(driver)
+                        falhas_consecutivas = 0
+                        log(texto, self.PREFIXO)
+                        self._status("ok")
+                    except Exception as e:
+                        falhas_consecutivas += 1
+                        log(f"ERRO na verificação (falha {falhas_consecutivas} seguida(s)): {e}", self.PREFIXO)
+                        debug_screenshot(driver, "erro_ciclo_programaveis")
+                        self._status(f"erro: {e}")
+
+                        if falhas_consecutivas >= config.MAX_FALHAS_CONSECUTIVAS_ANTES_DE_RECUPERAR:
+                            driver, falhas_consecutivas = self._recuperar(driver, falhas_consecutivas)
+
+                saude.dormir(self.NOME, config.INTERVALO_PROGRAMAVEIS_SEGUNDOS)
+        finally:
+            fechar_driver(driver)
+
+    def _recuperar(self, driver, falhas):
+        log(f"{falhas} falhas seguidas — tentando recuperar renavegando.", self.PREFIXO)
+        try:
+            navegar_ate_atividades_programaveis(driver)
+            return driver, 0
+        except Exception as e_nav:
+            log(f"Renavegação falhou ({e_nav}); tentando relogar do zero.", self.PREFIXO)
+            debug_screenshot(driver, "falha_recuperacao_navegacao")
+        try:
+            login(driver)
+            navegar_ate_atividades_programaveis(driver)
+            return driver, 0
+        except Exception as e_login:
+            log(f"Relogin também falhou ({e_login}); descartando sessão.", self.PREFIXO)
+            debug_screenshot(driver, "falha_recuperacao_relogin")
+            fechar_driver(driver)
+            return None, falhas
+
+
+# ------------------------------------------------------------------
+# EM CAMPO
+# ------------------------------------------------------------------
+
+class MonitorCampo(threading.Thread):
+    """A cada INTERVALO_CAMPO_MINUTOS abre um Chrome, loga, exporta a
+    planilha da Busca TdC e fecha o Chrome. Abrir/fechar a cada exportação
+    (em vez de manter a sessão aberta 30 min parada) evita lidar com sessão
+    expirada e libera memória entre um ciclo e outro.
+
+    Entre exportações, reavalia os alertas de vencimento a cada
+    REAVALIACAO_ALERTAS_MINUTOS sobre os últimos dados lidos."""
+
+    NOME = "campo"
+    PREFIXO = "CAMPO"
+
+    def __init__(self):
+        super().__init__(name=self.NOME, daemon=True)
+        secao = publicador.obter_secao("campo") or {}
+        self.registros = secao.get("registros") or []
+        self.atualizado_em = datetime.fromisoformat(secao["atualizado_em"]) if secao.get("atualizado_em") else None
+        self.arquivo = secao.get("arquivo")
+        self.proxima_extracao = _agora()  # exporta assim que entrar na janela
+        self._avisou_dados_velhos = False
+
+    def _status(self, estado):
+        saude.atualizar_status(self.NOME, estado)
+
+    def _exportar(self):
+        driver = None
+        try:
+            self._status("iniciando_sessao")
+            driver = abrir_driver(pasta_download=config.DOWNLOAD_DIR)
+            login(driver)
+            return exportar_religas_em_campo(driver, progresso=lambda etapa: saude.bater(self.NOME))
+        finally:
+            fechar_driver(driver)
+            if config.MODO_SEQUENCIAL:
+                _sessao_programaveis_invalidada.set()
+
+    def _publicar(self):
+        publicador.atualizar_secao("campo", {
+            "atualizado_em": self.atualizado_em.isoformat(timespec="seconds") if self.atualizado_em else None,
+            "proxima_extracao": self.proxima_extracao.isoformat(timespec="seconds"),
+            "arquivo": self.arquivo,
+            "registros": self.registros,
+        })
+
+    def ciclo_exportacao(self):
+        log("Iniciando exportação da Busca TdC.", self.PREFIXO)
+        try:
+            with _acesso_eorder(self.NOME):
+                arquivo = self._exportar()
+            registros = ler_religas_em_campo(arquivo)
+        except Exception as e:
+            self.proxima_extracao = _agora() + timedelta(minutes=config.RETENTATIVA_CAMPO_MINUTOS)
+            log(f"ERRO na exportação/leitura: {e}. Nova tentativa às {self.proxima_extracao:%H:%M}.", self.PREFIXO)
+            self._status(f"erro: {e}")
+            return
+
+        self.registros = registros
+        self.arquivo = arquivo.name
+        self.atualizado_em = _agora()
+        self.proxima_extracao = self.atualizado_em + timedelta(minutes=config.INTERVALO_CAMPO_MINUTOS)
+        self._avisou_dados_velhos = False
+        vencidas = sum(1 for r in registros if r["vencimento"] and datetime.fromisoformat(r["vencimento"]) <= self.atualizado_em)
+        log(f"{len(registros)} religa(s) em campo, {vencidas} vencida(s). Próxima exportação às {self.proxima_extracao:%H:%M}.", self.PREFIXO)
+        self._publicar()
+        self._status("ok")
+
+    def avaliar_alertas(self):
+        agora = _agora()
+        if self.atualizado_em is None:
+            return
+        idade = agora - self.atualizado_em
+        if idade > timedelta(minutes=config.IDADE_MAXIMA_DADOS_CAMPO_MINUTOS):
+            if not self._avisou_dados_velhos:
+                log(f"Dados de campo com {formatar_duracao(idade.total_seconds() / 60)} — alertas suspensos até a próxima exportação.", self.PREFIXO)
+                self._avisou_dados_velhos = True
+            return
+        avisos = processar_alertas(self.registros, agora)
+        for aviso in avisos:
+            log(f"Alerta: {aviso['titulo']}", self.PREFIXO)
+
+    def run(self):
+        while True:
+            if not dentro_da_janela_permitida():
+                self._status("fora_do_horario")
+                saude.dormir(self.NOME, config.FORA_DA_JANELA_INTERVALO_SEGUNDOS)
+                continue
+
+            if _agora() >= self.proxima_extracao:
+                self.ciclo_exportacao()
+
+            try:
+                self.avaliar_alertas()
+            except Exception as e:
+                log(f"ERRO ao avaliar alertas: {e}", self.PREFIXO)
+
+            espera = min(
+                config.REAVALIACAO_ALERTAS_MINUTOS * 60,
+                max(5.0, (self.proxima_extracao - _agora()).total_seconds()),
+            )
+            saude.bater(self.NOME)
+            saude.dormir(self.NOME, espera)
