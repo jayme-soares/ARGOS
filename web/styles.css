@@ -98,15 +98,10 @@ button { cursor: pointer; }
 
 /* ---------- MARCA ---------- */
 .marca { display: flex; align-items: center; gap: 10px; }
-.marca strong { display: block; font-size: 17px; letter-spacing: .18em; font-weight: 700; }
+.marca strong { display: block; font-family: "Syne", var(--sans); font-size: 17px; letter-spacing: .22em; font-weight: 500; }
 .marca small { display: block; color: var(--texto-2); font-size: 12px; margin-top: -2px; }
-.olho {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, var(--bg) 0 28%, var(--marca) 30% 100%);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--marca) 25%, transparent);
-  flex: none;
-}
-.marca-grande .olho { width: 40px; height: 40px; }
+.simbolo { width: 56px; height: 28px; color: var(--texto); flex: none; }
+.marca-grande .simbolo { width: 80px; height: 40px; }
 .marca-grande strong { font-size: 22px; }
 
 /* ---------- LOGIN ---------- */

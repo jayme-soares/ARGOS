@@ -6,18 +6,25 @@
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#0f1720">
   <title>ARGOS · Religações</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23e8b64c'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%230f1720'/%3E%3C/svg%3E">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Syne:wght@500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <!-- Símbolo do ARGOS (design "ARGOS — Logo"): pontos na cor do texto, centro na cor da marca. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="argos-simbolo" viewBox="0 50 200 100">
+      <g fill="currentColor"><circle cx="14.00" cy="100.00" r="0.92"/><circle cx="28.10" cy="91.72" r="1.18"/><circle cx="28.10" cy="108.28" r="1.18"/><circle cx="38.29" cy="81.80" r="1.36"/><circle cx="38.29" cy="118.20" r="1.36"/><circle cx="43.15" cy="93.11" r="1.44"/><circle cx="43.15" cy="106.89" r="1.44"/><circle cx="51.86" cy="79.06" r="1.58"/><circle cx="51.86" cy="120.94" r="1.58"/><circle cx="58.43" cy="68.80" r="1.67"/><circle cx="58.43" cy="131.20" r="1.67"/><circle cx="61.65" cy="91.79" r="1.72"/><circle cx="61.65" cy="108.21" r="1.72"/><circle cx="64.20" cy="79.51" r="1.75"/><circle cx="64.20" cy="120.49" r="1.75"/><circle cx="72.73" cy="68.53" r="1.86"/><circle cx="72.73" cy="131.47" r="1.86"/><circle cx="75.60" cy="88.23" r="2.80"/><circle cx="75.60" cy="111.77" r="2.80"/><circle cx="85.15" cy="70.02" r="2.00"/><circle cx="85.15" cy="129.98" r="2.00"/><circle cx="87.78" cy="58.21" r="2.02"/><circle cx="87.78" cy="141.79" r="2.02"/><circle cx="88.93" cy="84.49" r="2.80"/><circle cx="88.93" cy="115.51" r="2.80"/><circle cx="100.00" cy="62.20" r="2.10"/><circle cx="100.00" cy="74.20" r="2.80"/><circle cx="100.00" cy="125.80" r="2.80"/><circle cx="100.00" cy="137.80" r="2.10"/><circle cx="111.07" cy="84.49" r="2.80"/><circle cx="111.07" cy="115.51" r="2.80"/><circle cx="112.22" cy="58.21" r="2.02"/><circle cx="112.22" cy="141.79" r="2.02"/><circle cx="114.85" cy="70.02" r="2.00"/><circle cx="114.85" cy="129.98" r="2.00"/><circle cx="124.40" cy="88.23" r="2.80"/><circle cx="124.40" cy="111.77" r="2.80"/><circle cx="127.27" cy="68.53" r="1.86"/><circle cx="127.27" cy="131.47" r="1.86"/><circle cx="135.80" cy="79.51" r="1.75"/><circle cx="135.80" cy="120.49" r="1.75"/><circle cx="138.35" cy="91.79" r="1.72"/><circle cx="138.35" cy="108.21" r="1.72"/><circle cx="141.57" cy="68.80" r="1.67"/><circle cx="141.57" cy="131.20" r="1.67"/><circle cx="148.14" cy="79.06" r="1.58"/><circle cx="148.14" cy="120.94" r="1.58"/><circle cx="156.85" cy="93.11" r="1.44"/><circle cx="156.85" cy="106.89" r="1.44"/><circle cx="161.71" cy="81.80" r="1.36"/><circle cx="161.71" cy="118.20" r="1.36"/><circle cx="171.90" cy="91.72" r="1.18"/><circle cx="171.90" cy="108.28" r="1.18"/><circle cx="186.00" cy="100.00" r="0.92"/><circle cx="119.00" cy="100.00" r="2.80"/><circle cx="81.00" cy="100.00" r="2.80"/><circle cx="129.50" cy="100.00" r="2.80"/><circle cx="70.50" cy="100.00" r="2.80"/><circle cx="144.50" cy="100.00" r="1.63"/><circle cx="55.50" cy="100.00" r="1.63"/><circle cx="164.50" cy="100.00" r="1.31"/><circle cx="35.50" cy="100.00" r="1.31"/></g>
+      <circle cx="100" cy="100" r="9" style="fill: var(--marca)"/>
+    </symbol>
+  </svg>
   <!-- LOGIN -->
   <main id="tela-login" class="login" hidden>
     <form id="form-login" class="login-card" autocomplete="on">
       <div class="marca marca-grande">
-        <span class="olho" aria-hidden="true"></span>
+        <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
         <div>
           <strong>ARGOS</strong>
           <small>Religações · Maricá</small>
@@ -39,7 +46,7 @@
   <main id="tela-espera" class="login" hidden>
     <div class="login-card">
       <div class="marca marca-grande">
-        <span class="olho" aria-hidden="true"></span>
+        <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
         <div>
           <strong>ARGOS</strong>
           <small>Religações · Maricá</small>
@@ -57,7 +64,7 @@
   <div id="tela-painel" hidden>
     <header class="topo">
       <div class="marca">
-        <span class="olho" aria-hidden="true"></span>
+        <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
         <div>
           <strong>ARGOS</strong>
           <small>Religações · Maricá</small>
