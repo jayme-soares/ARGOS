@@ -6,3 +6,4 @@ openpyxl
 xlrd
 pyxlsb
 lxml
+pywebpush

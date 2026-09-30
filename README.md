@@ -11,7 +11,7 @@ VPS Hostinger (Docker)                          Vercel
 │        │ push                 │   Redis       │  (usuário/senha)     │
 └────────┼──────────────────────┘               └──────────────────────┘
          ▼
-      ntfy (celular / desktop)
+      ntfy (celular / desktop)  +  Web Push (sino do painel)
 ```
 
 ## O que o ARGOS faz
@@ -55,6 +55,7 @@ Cada ordem recebe cada aviso uma única vez.
 | `argos/eorder/` | Selenium: driver, login, Programáveis, Busca TdC/exportação |
 | `argos/planilha.py` | Leitura da planilha exportada. Detecta xlsx/xls/xlsb/HTML/XML pelo conteúdo |
 | `argos/alertas.py` | Regras dos pushes de vencimento |
+| `argos/notificacao.py` / `argos/webpush.py` | Envio dos pushes: ntfy e Web Push do painel |
 | `argos/publicador.py` | Snapshot JSON: grava em `/data/snapshot.json` e publica no Upstash |
 | `web/` | Painel (Vercel). HTML/CSS/JS puro, sem build |
 | `tests/` | Testes da planilha e dos alertas |
@@ -130,7 +131,22 @@ Para testar localmente: `cd web && npx vercel dev`, com as mesmas variáveis num
 
 ## Notificações
 
-Instale o app **ntfy** (Android, iOS ou desktop) e assine o tópico definido em `NTFY_TOPIC`. Quem souber o nome do tópico recebe os avisos, então use um sufixo aleatório e não divulgue.
+Os avisos saem por dois canais ao mesmo tempo. Cada pessoa usa o que preferir.
+
+**Pelo painel (sino no topo):** a pessoa entra no painel, toca no sino e aceita a permissão do navegador. Recebe mesmo com o painel fechado, sem instalar nada. Só recebe quem está aprovado; revogar o acesso corta os avisos, e sair do painel desativa as notificações naquele aparelho.
+- Android e computador: Chrome, Edge ou Firefox.
+- iPhone/iPad (iOS 16.4+): só com o ARGOS instalado. No Safari, Compartilhar → Adicionar à Tela de Início, abrir pelo ícone, entrar e tocar no sino.
+
+**Pelo ntfy:** instale o app **ntfy** (Android, iOS ou desktop) e assine o tópico definido em `NTFY_TOPIC`. Quem souber o nome do tópico recebe os avisos, então use um sufixo aleatório e não divulgue.
+
+### Configurar as notificações pelo painel (uma vez)
+
+1. No SQL Editor do Supabase, rode [`supabase/migrations/002_argos_push.sql`](supabase/migrations/002_argos_push.sql).
+2. Na VPS, gere as chaves: `docker compose run --rm argos python -m argos.webpush`. O comando imprime duas linhas para o `.env` e um `insert` para o Supabase.
+3. Rode o `insert` no SQL Editor do Supabase.
+4. No `.env` da VPS, preencha `SUPABASE_URL`, `SUPABASE_ANON_KEY` (os mesmos do Vercel), `ARGOS_PUSH_CHAVE`, `ARGOS_VAPID_CHAVE_PRIVADA` e `ARGOS_VAPID_CONTATO`, e suba de novo com `docker compose up -d`.
+
+O Vercel não precisa de variável nova: a chave pública vai para o painel dentro do snapshot. Não troque a `ARGOS_VAPID_CHAVE_PRIVADA` depois: todos teriam que ativar o sino de novo.
 
 ## Configuração
 

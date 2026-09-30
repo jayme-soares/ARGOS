@@ -166,6 +166,20 @@ HABILITAR_NOTIFICACAO_PUSH = _env_bool("ARGOS_PUSH", True)
 PAINEL_URL = _env_str("ARGOS_PAINEL_URL")
 
 # ------------------------------------------------------------------
+# NOTIFICAÇÃO PELO PAINEL (Web Push) — em paralelo ao ntfy
+# ------------------------------------------------------------------
+# Ver argos/webpush.py e supabase/migrations/002_argos_push.sql. Sem estas
+# variáveis, só o ntfy envia.
+SUPABASE_URL = _env_str("SUPABASE_URL")
+SUPABASE_ANON_KEY = _env_str("SUPABASE_ANON_KEY")
+# Chave do bot cadastrada (como hash) em public.argos_push_config.
+PUSH_CHAVE = _env_str("ARGOS_PUSH_CHAVE")
+# Gerada com `python -m argos.webpush`. A pública é derivada dela.
+VAPID_CHAVE_PRIVADA = _env_str("ARGOS_VAPID_CHAVE_PRIVADA")
+# Contato exigido pelos serviços de push (Google/Apple/Mozilla) na assinatura.
+VAPID_CONTATO = _env_str("ARGOS_VAPID_CONTATO", "mailto:argos@example.com")
+
+# ------------------------------------------------------------------
 # PUBLICAÇÃO DO SNAPSHOT (Upstash Redis)
 # ------------------------------------------------------------------
 UPSTASH_REDIS_REST_URL = _env_str("UPSTASH_REDIS_REST_URL")
@@ -187,6 +201,8 @@ def validar_config():
     avisos = []
     if HABILITAR_NOTIFICACAO_PUSH and not NTFY_TOPIC:
         avisos.append("NTFY_TOPIC não definido — notificações push desativadas.")
+    if HABILITAR_NOTIFICACAO_PUSH and not (SUPABASE_URL and SUPABASE_ANON_KEY and PUSH_CHAVE and VAPID_CHAVE_PRIVADA):
+        avisos.append("SUPABASE_URL/SUPABASE_ANON_KEY/ARGOS_PUSH_CHAVE/ARGOS_VAPID_CHAVE_PRIVADA incompletos — notificações pelo painel desativadas.")
     if not (UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN):
         avisos.append("UPSTASH_REDIS_REST_URL/TOKEN não definidos — o painel não vai receber dados.")
     return avisos

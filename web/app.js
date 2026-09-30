@@ -50,6 +50,8 @@ const estado = {
   acesso: null,      // linha do usuário em argos_acessos
   acessos: [],       // todas as linhas (só admins)
   ultimoErro: null,
+  push: null,        // estado do sino — ver atualizarEstadoPush()
+  pushSincronizado: false,
 };
 const ehAdmin = () => estado.acesso?.papel === "admin" && estado.acesso?.status === "aprovado";
 
@@ -163,6 +165,7 @@ async function buscarSnapshot() {
     if (!r.ok) throw new Error(corpo.erro || `Erro ${r.status}`);
     estado.snapshot = corpo;
     estado.ultimoErro = null;
+    if (!estado.pushSincronizado) { estado.pushSincronizado = true; sincronizarPush(); }
     if (ehAdmin()) await carregarAcessos();
     return true;
   } catch (e) {
@@ -217,6 +220,8 @@ function mostrarEspera(status, email) {
 }
 
 async function sair(mensagem) {
+  // Aparelho compartilhado: quem sai não continua recebendo os avisos.
+  await desativarPush({ silencioso: true });
   estado.acesso = null;
   estado.snapshot = null;
   estado.acessos = [];
@@ -665,6 +670,136 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && estado.acesso && !$("#tela-painel").hidden) buscarSnapshot();
 });
 
+
+// ------------------------------------------------------------------
+// NOTIFICAÇÕES PELO PAINEL (Web Push)
+// ------------------------------------------------------------------
+// O sino inscreve este navegador (service worker sw.js) e grava a inscrição
+// no Supabase (argos_push_inscrever). O bot envia para todas as inscrições
+// de usuários aprovados. A chave pública VAPID vem no snapshot.
+const pushSuportado = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const ehIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const instaladoNaTela = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const chavePushServidor = () => estado.snapshot?.config?.push_chave_publica || null;
+
+let registroSW = null;
+async function registrarSW() {
+  if (!("serviceWorker" in navigator)) return null;
+  try { registroSW = await navigator.serviceWorker.register("/sw.js"); } catch { registroSW = null; }
+  return registroSW;
+}
+
+function base64UrlParaBytes(b64) {
+  const bin = atob((b64 + "=".repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+}
+function bytesParaBase64Url(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function inscricaoAtual() {
+  if (!pushSuportado()) return null;
+  const reg = registroSW || await registrarSW();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+
+async function salvarInscricao(sub) {
+  const j = sub.toJSON();
+  const { error } = await estado.sb.rpc("argos_push_inscrever", {
+    p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_user_agent: navigator.userAgent,
+  });
+  if (error) throw new Error(error.message);
+}
+
+async function atualizarEstadoPush() {
+  if (!pushSuportado()) estado.push = ehIOS() && !instaladoNaTela() ? "ios_instalar" : "indisponivel";
+  else if (Notification.permission === "denied") estado.push = "bloqueado";
+  else estado.push = Notification.permission === "granted" && await inscricaoAtual() ? "ativo" : "desativado";
+  renderPush();
+}
+
+function renderPush() {
+  const btn = $("#btn-push");
+  const textos = {
+    ativo: "Notificações ativadas neste aparelho (clique para desativar)",
+    desativado: "Ativar notificações neste aparelho",
+    bloqueado: "Notificações bloqueadas no navegador",
+    ios_instalar: "Ativar notificações (requer instalar o ARGOS na Tela de Início)",
+    indisponivel: "Este navegador não suporta notificações",
+  };
+  btn.hidden = !estado.push;
+  btn.setAttribute("aria-pressed", String(estado.push === "ativo"));
+  btn.classList.toggle("bloqueado", estado.push === "bloqueado" || estado.push === "indisponivel");
+  btn.title = textos[estado.push] || "";
+  btn.setAttribute("aria-label", btn.title);
+}
+
+// Depois do login: prende a inscrição existente ao usuário atual e refaz
+// se o servidor trocou a chave VAPID (a inscrição antiga deixa de valer).
+async function sincronizarPush() {
+  try {
+    const sub = pushSuportado() && Notification.permission === "granted" ? await inscricaoAtual() : null;
+    const chave = chavePushServidor();
+    if (sub && chave) {
+      const atual = sub.options?.applicationServerKey;
+      if (atual && bytesParaBase64Url(atual) !== chave) {
+        await sub.unsubscribe();
+        await salvarInscricao(await registroSW.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlParaBytes(chave) }));
+      } else {
+        await salvarInscricao(sub);
+      }
+    }
+  } catch { /* tenta de novo no próximo login */ }
+  await atualizarEstadoPush();
+}
+
+async function ativarPush() {
+  const chave = chavePushServidor();
+  if (!chave) { alert("As notificações pelo painel ainda não foram configuradas no servidor."); return; }
+  // Pedir a permissão logo no clique: o Safari recusa se vier depois de outro await.
+  const permissao = await Notification.requestPermission();
+  if (permissao !== "granted") { await atualizarEstadoPush(); return; }
+  try {
+    const reg = registroSW || await registrarSW();
+    if (!reg) throw new Error("não foi possível registrar o service worker");
+    await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlParaBytes(chave) });
+    await salvarInscricao(sub);
+    reg.showNotification("ARGOS", { body: "Notificações ativadas neste aparelho.", icon: "/icones/icone-192.png" });
+  } catch (e) {
+    alert(`Não foi possível ativar as notificações: ${e.message || e}`);
+  }
+  await atualizarEstadoPush();
+}
+
+async function desativarPush({ silencioso = false } = {}) {
+  try {
+    const sub = await inscricaoAtual();
+    if (sub) {
+      await estado.sb.rpc("argos_push_cancelar", { p_endpoint: sub.endpoint });  // devolve {error}, não lança
+      await sub.unsubscribe();
+    }
+  } catch (e) {
+    if (!silencioso) alert(`Não foi possível desativar: ${e.message || e}`);
+  }
+  if (!silencioso) await atualizarEstadoPush();
+}
+
+$("#btn-push").addEventListener("click", async () => {
+  switch (estado.push) {
+    case "desativado": return ativarPush();
+    case "ativo":
+      if (confirm("Desativar as notificações do ARGOS neste aparelho?")) await desativarPush();
+      return;
+    case "bloqueado":
+      return alert("As notificações do ARGOS estão bloqueadas neste navegador. Libere nas configurações do site (ícone ao lado do endereço) e clique no sino de novo.");
+    case "ios_instalar":
+      return alert("No iPhone/iPad, as notificações só funcionam com o ARGOS instalado:\n\n1. Toque em Compartilhar (quadrado com a seta) no Safari.\n2. Escolha \"Adicionar à Tela de Início\".\n3. Abra o ARGOS pelo ícone criado, entre e toque no sino.\n\nRequer iOS 16.4 ou mais recente.");
+    default:
+      return alert("Este navegador não suporta notificações. Use Chrome, Edge ou Firefox.");
+  }
+});
+
 // ------------------------------------------------------------------
 // INÍCIO
 // ------------------------------------------------------------------
@@ -687,6 +822,8 @@ function pararTimers() {
 
 function iniciarPainel() {
   mostrarTela("#tela-painel");
+  estado.pushSincronizado = false;
+  atualizarEstadoPush();
   pararTimers();
   timers = [
     setInterval(() => { if (document.visibilityState === "visible") buscarSnapshot(); }, INTERVALO_BUSCA_MS),
@@ -699,6 +836,7 @@ function iniciarPainel() {
 
 async function iniciar() {
   if (prefsSalvas.tema) document.documentElement.dataset.theme = prefsSalvas.tema;
+  registrarSW();
   try {
     const r = await fetch("/api/config");
     const cfg = await r.json();

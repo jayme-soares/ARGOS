@@ -168,6 +168,10 @@ button { cursor: pointer; }
 .btn-icone { width: 34px; }
 .btn-texto { padding: 0 12px; }
 .btn-icone:hover, .btn-texto:hover { color: var(--texto); border-color: var(--texto-3); }
+#btn-push .risco { display: none; }
+#btn-push[aria-pressed="true"] { color: var(--marca); border-color: color-mix(in srgb, var(--marca) 55%, transparent); }
+#btn-push.bloqueado .risco { display: inline; }
+#btn-push.bloqueado { color: var(--texto-3); }
 .girando svg { animation: girar .8s linear infinite; }
 @keyframes girar { to { transform: rotate(360deg); } }
 

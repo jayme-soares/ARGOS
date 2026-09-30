@@ -16,7 +16,7 @@ from datetime import datetime
 
 import requests
 
-from argos import config
+from argos import config, webpush
 from argos.estado import carregar_json, salvar_json
 from argos.log import log
 
@@ -35,6 +35,8 @@ _snapshot = {
         "intervalo_campo_min": config.INTERVALO_CAMPO_MINUTOS,
         "intervalo_programaveis_seg": config.INTERVALO_PROGRAMAVEIS_SEGUNDOS,
         "alertas_min": config.ALERTAS_MINUTOS,
+        # O painel usa para inscrever o navegador no Web Push; None = desativado.
+        "push_chave_publica": webpush.chave_publica() if webpush.habilitado() else None,
     },
     "status": {},
     "programaveis": {"atualizado_em": None, "total": 0, "registros": []},
