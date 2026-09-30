@@ -247,8 +247,67 @@ async function verificarAcesso({ silencioso = false } = {}) {
   }
 }
 
+// O mesmo cartão serve para entrar e para criar conta. Os campos só do
+// cadastro ficam desabilitados no modo "entrar" para não travar a validação.
+let modoCadastro = false;
+function definirModoCadastro(ativo) {
+  modoCadastro = ativo;
+  for (const el of $$("[data-so-cadastro]")) {
+    el.hidden = !ativo;
+    el.querySelector("input").disabled = !ativo;
+  }
+  $("#login-senha").autocomplete = ativo ? "new-password" : "current-password";
+  $("#login-senha").minLength = ativo ? 6 : 0;
+  $("#btn-login").textContent = ativo ? "Criar conta" : "Entrar";
+  $("#btn-alternar-cadastro").textContent = ativo ? "Já tenho conta: entrar" : "Não tem conta? Cadastre-se";
+  $("#login-dica").textContent = ativo
+    ? "Depois do cadastro, um administrador precisa aprovar seu acesso."
+    : "Se já usa os sistemas da empresa, entre com o mesmo email e senha. No primeiro acesso, um administrador precisa aprovar sua entrada.";
+  $("#login-erro").textContent = "";
+  (ativo ? $("#login-nome") : $("#login-email")).focus();
+}
+definirModoCadastro(false);
+
+$("#btn-alternar-cadastro").addEventListener("click", () => definirModoCadastro(!modoCadastro));
+
+async function cadastrar() {
+  if ($("#login-senha").value !== $("#login-senha2").value) {
+    $("#login-erro").textContent = "As senhas não conferem.";
+    return;
+  }
+  $("#login-erro").textContent = "Criando conta…";
+  const email = $("#login-email").value.trim();
+  const { data, error } = await estado.sb.auth.signUp({
+    email,
+    password: $("#login-senha").value,
+    // argos_solicitar_acesso lê o nome de raw_user_meta_data ->> 'nome'.
+    options: { data: { nome: $("#login-nome").value.trim() }, emailRedirectTo: location.origin },
+  });
+  if (error) {
+    $("#login-erro").textContent = /already registered/i.test(error.message)
+      ? "Esse email já tem conta. Use “Entrar”."
+      : error.message;
+    return;
+  }
+  $("#login-senha").value = "";
+  $("#login-senha2").value = "";
+  // Com confirmação de email ligada no Supabase, o signUp não abre sessão; o
+  // pedido de acesso é criado no primeiro login, depois de confirmar.
+  // Sem identities = email já cadastrado (o Supabase não revela isso como erro).
+  if (!data.session) {
+    definirModoCadastro(false);
+    $("#login-erro").textContent = data.user?.identities?.length === 0
+      ? "Esse email já tem conta. Entre com sua senha."
+      : `Enviamos um link de confirmação para ${email}. Confirme e depois entre aqui.`;
+    return;
+  }
+  definirModoCadastro(false);
+  await verificarAcesso();
+}
+
 $("#form-login").addEventListener("submit", async (ev) => {
   ev.preventDefault();
+  if (modoCadastro) { await cadastrar(); return; }
   $("#login-erro").textContent = "Entrando…";
   const { error } = await estado.sb.auth.signInWithPassword({
     email: $("#login-email").value.trim(),
@@ -847,7 +906,7 @@ async function iniciar() {
     });
   } catch (e) {
     mostrarLogin(`Painel sem configuração: ${e.message}`);
-    $("#form-login button").disabled = true;
+    $$("#form-login button").forEach((b) => { b.disabled = true; });
     return;
   }
   estado.sb.auth.onAuthStateChange((evento) => {

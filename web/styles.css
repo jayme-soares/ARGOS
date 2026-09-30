@@ -122,6 +122,8 @@ button { cursor: pointer; }
 .btn-primario:hover { filter: brightness(1.05); }
 .login-erro { color: var(--vencida); margin: 0; min-height: 1.2em; font-size: 13px; }
 .login-dica { color: var(--texto-3); margin: 0; font-size: 12px; }
+.btn-link { background: none; border: 0; padding: 0; color: var(--texto-2); font-size: 13px; text-decoration: underline; justify-self: center; }
+.btn-link:hover { color: var(--texto); }
 .espera-titulo { margin: 4px 0 0; font-size: 18px; }
 .espera-texto { margin: 0; color: var(--texto-2); }
 .usuario-atual { align-self: center; color: var(--texto-2); font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

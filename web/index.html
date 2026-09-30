@@ -34,15 +34,22 @@
           <small>Religações · Maricá</small>
         </div>
       </div>
+      <label data-so-cadastro hidden>Nome
+        <input id="login-nome" name="name" type="text" autocomplete="name" required disabled>
+      </label>
       <label>Email
         <input id="login-email" name="email" type="email" autocomplete="username" required>
       </label>
       <label>Senha
         <input id="login-senha" name="password" type="password" autocomplete="current-password" required>
       </label>
-      <button type="submit" class="btn-primario">Entrar</button>
+      <label data-so-cadastro hidden>Confirme a senha
+        <input id="login-senha2" name="password2" type="password" autocomplete="new-password" minlength="6" required disabled>
+      </label>
+      <button id="btn-login" type="submit" class="btn-primario">Entrar</button>
       <p id="login-erro" class="login-erro" role="alert"></p>
-      <p class="login-dica">Use o mesmo email e senha dos sistemas da empresa. No primeiro acesso, um administrador precisa aprovar sua entrada.</p>
+      <p id="login-dica" class="login-dica"></p>
+      <button id="btn-alternar-cadastro" type="button" class="btn-link"></button>
     </form>
   </main>
 

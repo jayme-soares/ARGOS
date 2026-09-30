@@ -106,7 +106,7 @@ Diagnóstico:
 
 ## Acesso ao painel (Supabase)
 
-O login usa as contas que já existem no Supabase Auth da empresa (email e senha). O acesso ao ARGOS é controlado pela tabela `public.argos_acessos`:
+O login usa o Supabase Auth da empresa (email e senha). Quem já tem conta entra direto; quem não tem pode se cadastrar pela própria tela de login ("Não tem conta? Cadastre-se"). Em qualquer caso, o acesso ao ARGOS é controlado pela tabela `public.argos_acessos`:
 
 - O **primeiro usuário** que entrar no painel vira administrador automaticamente.
 - Os demais ficam **aguardando aprovação** até um admin aprovar na aba **Acessos**, que só aparece para admins.
@@ -116,6 +116,8 @@ Para configurar:
 
 1. No Supabase da empresa, abra o **SQL Editor** e rode [`supabase/migrations/001_argos_acessos.sql`](supabase/migrations/001_argos_acessos.sql). A migração só cria a tabela `argos_acessos` e as funções `argos_*`; nada do que já existe é alterado.
 2. Entre no painel com a sua conta **antes de divulgar o link**, porque o primeiro login vira admin.
+3. Para o cadastro funcionar, em **Authentication → Sign In / Providers**, deixe ligado **Allow new users to sign up** (e o provedor Email).
+4. Se **Confirm email** estiver ligado, a pessoa recebe um link e só consegue entrar depois de confirmar. Nesse caso, em **Authentication → URL Configuration**, adicione o endereço do painel no Vercel em **Redirect URLs** (e, se quiser, como **Site URL**).
 
 ## Painel no Vercel
 
