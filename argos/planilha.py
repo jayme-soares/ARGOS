@@ -36,6 +36,7 @@ COLUNAS = {
     # "Código Equipe" em vez de "Equipe": na coluna Equipe o eOrder às vezes
     # traz o nome do responsável no lugar do código da equipe.
     "equipe": "Código Equipe",
+    "municipio": "Município",
     "bairro": "Bairro",
     "tipo": "Tipo de Serviço",
     "vencimento": "Prazo ANS Legal",
@@ -247,10 +248,18 @@ def converter_data(valor) -> datetime | None:
 # API
 # ------------------------------------------------------------------
 
+def _pertence_ao_escopo(municipio: str, equipe: str) -> bool:
+    """Só o município e as equipes da CENEGED (ver config.MUNICIPIO_CAMPO e
+    config.PREFIXO_EQUIPE_CAMPO). Ordem sem equipe fica de fora."""
+    if normalizar_texto(municipio) != normalizar_texto(config.MUNICIPIO_CAMPO):
+        return False
+    return equipe.upper().startswith(config.PREFIXO_EQUIPE_CAMPO.upper())
+
+
 def ler_religas_em_campo(caminho: Path | str) -> list[dict]:
-    """Lista de ordens em aberto, deduplicada por TdC e ordenada pelo
-    vencimento (sem vencimento vão para o fim). `vencimento` sai em ISO 8601
-    com fuso, pronto para o JSON do painel."""
+    """Lista de ordens em aberto do município/equipes do escopo, deduplicada
+    por TdC e ordenada pelo vencimento (sem vencimento vão para o fim).
+    `vencimento` sai em ISO 8601 com fuso, pronto para o JSON do painel."""
     caminho = Path(caminho)
     abas = _ler_bruto(caminho.read_bytes(), caminho.name)
     df = _escolher_aba(abas)
@@ -260,6 +269,8 @@ def ler_religas_em_campo(caminho: Path | str) -> list[dict]:
     for _, linha in df.iterrows():
         tdc = _texto(linha[mapa["tdc"]])
         if not tdc or tdc in registros:
+            continue
+        if not _pertence_ao_escopo(_texto(linha[mapa["municipio"]]), _texto(linha[mapa["equipe"]])):
             continue
         venc = converter_data(linha[mapa["vencimento"]])
         registro = {campo: _texto(linha[col]) for campo, col in mapa.items() if campo != "vencimento"}

@@ -10,6 +10,7 @@
 const TZ = "America/Sao_Paulo";
 const INTERVALO_BUSCA_MS = 60_000;
 const INTERVALO_RELOGIO_MS = 30_000;
+const INTERVALO_CONTADOR_MS = 1_000;
 const CHAVE_PREFS = "argos.prefs";
 
 const $ = (sel) => document.querySelector(sel);
@@ -70,9 +71,16 @@ function data(iso) {
   return isNaN(d) ? null : d;
 }
 function mesmoDia(a, b) { return fmtDia.format(a) === fmtDia.format(b); }
-function horaOuDia(d, agora) {
-  if (!d) return "—";
-  return mesmoDia(d, agora) ? fmtHora.format(d) : fmtDiaHora.format(d).replace(",", "");
+function diaHora(d) {
+  return d ? fmtDiaHora.format(d).replace(",", "") : "—";
+}
+// Contagem regressiva hh:mm:ss (horas podem passar de 24).
+function cronometro(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
 }
 function duracao(min) {
   const total = Math.round(Math.abs(min));
@@ -264,6 +272,7 @@ function renderizar() {
   const programaveis = enriquecer(snap?.programaveis?.registros, agora);
 
   renderStatus(snap, agora);
+  renderExtracao(snap, agora);
   renderAvisos(snap, agora);
   renderKpis(snap, campo, programaveis, agora);
   renderAbas(campo, programaveis);
@@ -290,13 +299,46 @@ function renderStatus(snap, agora) {
   for (const [chave, nome] of [["programaveis", "Programáveis"], ["campo", "Em campo"]]) {
     const st = descreverStatus(snap?.status?.[chave]);
     const atualizado = data(snap?.[chave]?.atualizado_em);
-    let extra = atualizado ? ` · ${fmtHora.format(atualizado)}` : "";
-    if (chave === "campo" && snap?.campo?.proxima_extracao && st.cls !== "pausa") {
-      extra += ` · próx. ${fmtHora.format(data(snap.campo.proxima_extracao))}`;
-    }
+    const extra = atualizado ? ` · ${fmtHora.format(atualizado)}` : "";
     pills.push(`<span class="pill" title="${esc(snap?.status?.[chave]?.estado || "")}"><span class="ponto ${st.cls}"></span><b>${nome}</b> ${esc(st.txt)}${esc(extra)}</span>`);
   }
   $("#status").innerHTML = pills.join("");
+}
+
+function renderExtracao(snap, agora) {
+  const el = $("#extracao");
+  if (!snap) { el.hidden = true; return; }
+  el.hidden = false;
+  const ultima = data(snap.campo?.atualizado_em);
+  const proxima = data(snap.campo?.proxima_extracao);
+  const st = descreverStatus(snap.status?.campo);
+
+  let proximaTxt, proximaDet;
+  if (st.cls === "pausa" || !dentroDaJanela(agora, snap.janela)) {
+    proximaTxt = "fora do horário";
+    proximaDet = snap.janela ? `retoma às ${snap.janela.inicio}h` : "";
+  } else if (!proxima) {
+    proximaTxt = "—";
+    proximaDet = "";
+  } else if (proxima <= agora) {
+    proximaTxt = diaHora(proxima);
+    proximaDet = st.cls === "ocupado" ? "extraindo agora…" : "a qualquer momento";
+  } else {
+    proximaTxt = diaHora(proxima);
+    proximaDet = `em ${duracao((proxima - agora) / 60000)}`;
+  }
+
+  el.innerHTML = `
+    <div class="extracao-item">
+      <span class="extracao-rotulo">Última extração</span>
+      <span class="extracao-valor num">${esc(diaHora(ultima))}</span>
+      <span class="extracao-detalhe">${esc(ultima ? haQuanto(ultima, agora) : "ainda não houve extração")}</span>
+    </div>
+    <div class="extracao-item">
+      <span class="extracao-rotulo">Próxima extração</span>
+      <span class="extracao-valor num">${esc(proximaTxt)}</span>
+      <span class="extracao-detalhe">${esc(proximaDet)}</span>
+    </div>`;
 }
 
 function renderAvisos(snap, agora) {
@@ -325,14 +367,14 @@ function renderAvisos(snap, agora) {
   $("#avisos").innerHTML = avisos.map((a) => `<div class="aviso${a.erro ? " erro" : ""}">${esc(a.txt)}</div>`).join("");
 }
 
-function kpi({ rotulo, valor, detalhe = "", cor = null, acao = null, destaque = false }) {
+function kpi({ rotulo, valor, detalhe = "", cor = null, acao = null, destaque = false, contagemAte = null }) {
   const tag = acao ? "button" : "div";
   const estilo = cor ? `style="--cor: var(--${cor}); --cor-valor: var(--${cor})"` : "";
   const zero = valor === 0 ? " zero" : "";
   const dataAcao = acao ? `data-acao="${esc(acao)}"` : "";
   return `<${tag} class="kpi${destaque ? " destaque" : ""}${zero}" ${estilo} ${dataAcao}>
     <div class="rotulo">${esc(rotulo)}</div>
-    <div class="valor">${esc(valor)}</div>
+    <div class="valor"${contagemAte ? ` data-contagem-ate="${contagemAte.getTime()}"` : ""}>${esc(valor)}</div>
     <div class="detalhe">${detalhe}</div>
   </${tag}>`;
 }
@@ -358,9 +400,10 @@ function renderKpis(snap, campo, programaveis, agora) {
     kpi({ rotulo: "Vencem hoje", valor: hoje, detalhe: "ainda no prazo" }),
     kpi({ rotulo: "Programáveis", valor: totalProg, detalhe: novasProg ? `${novasProg} nova(s) em 1h` : "aguardando designação", cor: totalProg ? "atencao" : null, acao: "programaveis:" }),
     kpi({
-      rotulo: "Próximo vencimento",
-      valor: proxima ? duracao(proxima._min) : "—",
-      detalhe: proxima ? `${fmtHora.format(proxima._venc)} · TdC ${esc(proxima.tdc)} · ${esc(proxima.equipe || "sem equipe")}` : "nenhuma ordem no prazo",
+      rotulo: "Próximo vencimento em",
+      valor: proxima ? cronometro(proxima._venc - agora) : "—",
+      contagemAte: proxima?._venc,
+      detalhe: proxima ? `vence ${esc(diaHora(proxima._venc))} · TdC ${esc(proxima.tdc)} · ${esc(proxima.equipe || "sem equipe")}` : "nenhuma ordem no prazo",
       cor: proxima ? proxima._urg : null,
       destaque: true,
     }),
@@ -402,7 +445,7 @@ const celRestante = (r) => `<span class="badge">${esc(textoRestante(r._min))}</s
 const COLUNAS = {
   campo: [
     { id: "restante", rotulo: "Tempo restante", valor: (r) => r._min, html: celRestante },
-    { id: "vencimento", rotulo: "Vencimento", valor: (r) => r._min, html: (r, agora) => `<span class="num">${esc(horaOuDia(r._venc, agora))}</span>` },
+    { id: "vencimento", rotulo: "Vencimento", valor: (r) => r._min, html: (r) => `<span class="num">${esc(diaHora(r._venc))}</span>` },
     { id: "ordem", rotulo: "Ordem", valor: (r) => r.ordem, html: (r) => `<span class="num">${esc(r.ordem)}</span>` },
     { id: "tdc", rotulo: "TdC", valor: (r) => r.tdc, html: (r) => `<span class="num">${esc(r.tdc)}</span>` },
     { id: "cliente", rotulo: "Cliente", valor: (r) => r.cliente, html: (r) => `<span class="num">${esc(r.cliente)}</span>${r.nome_cliente ? `<div class="secundario">${esc(r.nome_cliente)}</div>` : ""}` },
@@ -412,7 +455,7 @@ const COLUNAS = {
   ],
   programaveis: [
     { id: "restante", rotulo: "Tempo restante", valor: (r) => r._min, html: celRestante },
-    { id: "vencimento", rotulo: "Vencimento", valor: (r) => r._min, html: (r, agora) => `<span class="num">${esc(horaOuDia(r._venc, agora))}</span>` },
+    { id: "vencimento", rotulo: "Vencimento", valor: (r) => r._min, html: (r) => `<span class="num">${esc(diaHora(r._venc))}</span>` },
     { id: "tdc", rotulo: "TdC", valor: (r) => r.tdc, html: (r, agora) => {
       const visto = data(r.primeiro_visto_em);
       const novo = visto && agora - visto <= 30 * 60000 ? `<span class="novo">NOVA</span>` : "";
@@ -625,6 +668,17 @@ document.addEventListener("visibilitychange", () => {
 // ------------------------------------------------------------------
 // INÍCIO
 // ------------------------------------------------------------------
+// Anda o cronômetro do "Próximo vencimento" a cada segundo sem redesenhar
+// o painel inteiro; ao zerar, redesenha para pegar a próxima ordem.
+function atualizarContadores() {
+  const agora = Date.now();
+  for (const el of $$("[data-contagem-ate]")) {
+    const restante = Number(el.dataset.contagemAte) - agora;
+    if (restante <= 0) { renderizar(); return; }
+    el.textContent = cronometro(restante);
+  }
+}
+
 let timers = [];
 function pararTimers() {
   timers.forEach(clearInterval);
@@ -637,6 +691,7 @@ function iniciarPainel() {
   timers = [
     setInterval(() => { if (document.visibilityState === "visible") buscarSnapshot(); }, INTERVALO_BUSCA_MS),
     setInterval(renderizar, INTERVALO_RELOGIO_MS),
+    setInterval(atualizarContadores, INTERVALO_CONTADOR_MS),
   ];
   renderizar();
   buscarSnapshot();

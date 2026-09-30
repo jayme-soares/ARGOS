@@ -91,6 +91,11 @@ INTERVALO_PROGRAMAVEIS_SEGUNDOS = _env_int("ARGOS_INTERVALO_PROGRAMAVEIS_SEG", 6
 
 # --- Em campo (Busca TdC) ---
 FILTRO_CAMPO = _env_str("ARGOS_FILTRO_CAMPO", "PARCIAL RELIGA CENEGED - MARICÁ")
+# O filtro salvo traz ordens de outros municípios e de equipes de outras
+# empresas; só ficam as do município abaixo (comparado sem acento/caixa) e
+# as de equipes cujo "Código Equipe" começa com o prefixo (NI2 = CENEGED).
+MUNICIPIO_CAMPO = _env_str("ARGOS_MUNICIPIO_CAMPO", "MARICÁ")
+PREFIXO_EQUIPE_CAMPO = _env_str("ARGOS_PREFIXO_EQUIPE_CAMPO", "NI2")
 INTERVALO_CAMPO_MINUTOS = _env_int("ARGOS_INTERVALO_CAMPO_MIN", 30)
 # Se a exportação falhar, tenta de novo depois desse tempo (em vez de
 # esperar o intervalo cheio de 30 min).

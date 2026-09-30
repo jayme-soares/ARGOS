@@ -41,17 +41,14 @@ def formatar_duracao(minutos: float) -> str:
     return f"{m} min"
 
 
-def _linha(reg: dict, venc: datetime, agora: datetime) -> str:
-    restante = (venc - agora).total_seconds() / 60
-    hora = venc.strftime("%H:%M") if venc.date() == agora.date() else venc.strftime("%d/%m %H:%M")
-    quando = f"venceu {hora} (há {formatar_duracao(restante)})" if restante <= 0 else f"vence {hora} (em {formatar_duracao(restante)})"
-    partes = [f"TdC {reg.get('tdc')}", reg.get("equipe") or "sem equipe", reg.get("bairro") or "", quando]
-    return "• " + " · ".join(p for p in partes if p)
+def linha_push(tdc: str, venc: datetime | None) -> str:
+    """Push enxuto: só o TdC e a data/hora do vencimento — o resto está no painel."""
+    return f"• TdC {tdc} — {venc:%d/%m %H:%M}" if venc else f"• TdC {tdc}"
 
 
 def _mensagem(itens: list[tuple[dict, datetime]], agora: datetime) -> str:
     itens = sorted(itens, key=lambda x: x[1])
-    linhas = [_linha(r, v, agora) for r, v in itens[:MAX_LINHAS_PUSH]]
+    linhas = [linha_push(r.get("tdc"), v) for r, v in itens[:MAX_LINHAS_PUSH]]
     if len(itens) > MAX_LINHAS_PUSH:
         linhas.append(f"+{len(itens) - MAX_LINHAS_PUSH} outra(s) — veja o painel.")
     return "\n".join(linhas)

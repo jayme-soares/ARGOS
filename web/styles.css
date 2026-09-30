@@ -176,6 +176,17 @@ button { cursor: pointer; }
 .girando svg { animation: girar .8s linear infinite; }
 @keyframes girar { to { transform: rotate(360deg); } }
 
+/* ---------- EXTRAÇÃO ---------- */
+.extracao {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 12px 24px 0;
+  background: var(--bg-elev); border: 1px solid var(--borda); border-radius: var(--raio); box-shadow: var(--sombra);
+}
+.extracao-item { display: grid; gap: 1px; padding: 10px 16px; min-width: 0; }
+.extracao-item + .extracao-item { border-left: 1px solid var(--borda); }
+.extracao-rotulo { color: var(--texto-2); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.extracao-valor { font-size: 20px; font-weight: 600; color: var(--texto); }
+.extracao-detalhe { color: var(--texto-3); font-size: 12px; min-height: 1.2em; }
+
 /* ---------- AVISOS ---------- */
 .avisos { padding: 0 24px; display: grid; gap: 8px; margin-top: 12px; }
 .avisos:empty { display: none; }
@@ -293,6 +304,9 @@ button.kpi:hover { border-color: var(--texto-3); }
   .acoes-topo { margin-left: auto; }
   .usuario-atual { display: none; }
   .avisos, .kpis, .filtros, .tabela-wrap, .rodape { padding-left: 16px; padding-right: 16px; }
+  .extracao { margin-left: 16px; margin-right: 16px; }
+  .extracao-item { padding: 8px 12px; }
+  .extracao-valor { font-size: 16px; }
   .abas { padding-left: 16px; padding-right: 16px; }
   .kpis { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .kpi.destaque { grid-column: span 2; }

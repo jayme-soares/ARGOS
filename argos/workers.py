@@ -15,7 +15,7 @@ import threading
 from datetime import datetime, timedelta
 
 from argos import config, publicador, saude
-from argos.alertas import formatar_duracao, processar_alertas
+from argos.alertas import formatar_duracao, linha_push, processar_alertas
 from argos.eorder.busca_tdc import exportar_religas_em_campo
 from argos.eorder.driver import abrir_driver, fechar_driver
 from argos.eorder.programaveis import (
@@ -150,15 +150,15 @@ class MonitorProgramaveis(threading.Thread):
         texto += f". Total: {quantidade}.{venc_txt}"
 
         novos = [r for r in registros if r["codigo_tdc"] in set(ids_novos)]
-        linhas = []
-        for r in novos[:5]:
-            venc = f"vence {datetime.fromisoformat(r['vencimento_iso']):%d/%m %H:%M}" if r["vencimento_iso"] else ""
-            linhas.append("• " + " · ".join(p for p in (f"TdC {r['codigo_tdc']}", r["endereco"], venc) if p))
+        linhas = [
+            linha_push(r["codigo_tdc"], datetime.fromisoformat(r["vencimento_iso"]) if r["vencimento_iso"] else None)
+            for r in novos[:5]
+        ]
         if len(novos) > 5:
             linhas.append(f"+{len(novos) - 5} outra(s) — veja o painel.")
         enviar_notificacao_push(
             titulo=f"ARGOS · {len(ids_novos)} nova(s) religação(ões) programável(is)",
-            mensagem=texto + "\n" + "\n".join(linhas),
+            mensagem="\n".join(linhas),
             prioridade=4,
             tags=["rotating_light"],
         )

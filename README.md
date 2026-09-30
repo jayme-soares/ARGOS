@@ -27,16 +27,20 @@ VPS Hostinger (Docker)                          Vercel
   - ordem (`Numero de Serviço`)
   - TdC
   - cliente
-  - equipe
+  - equipe (`Código Equipe`)
+  - município
   - bairro
   - tipo (`Tipo de Serviço`)
   - vencimento (`Prazo ANS Legal`)
+- Só entram as ordens do município de Maricá cujo `Código Equipe` começa com `NI2` (equipes da CENEGED).
 
 **Pushes de vencimento** das ordens em campo. Os alertas são reavaliados a cada 5 min:
 - 1h antes do vencimento
 - 30 min antes do vencimento
 - quando a ordem vence e continua em aberto
 - um lembrete com as vencidas em aberto a cada 1h
+
+Cada push lista só o TdC e a data/hora do vencimento; os detalhes ficam no painel.
 
 Cada ordem recebe cada aviso uma única vez.
 
@@ -135,6 +139,8 @@ Todas as opções estão comentadas em [`.env.example`](.env.example). As princi
 | Variável | Padrão | Uso |
 |---|---|---|
 | `ARGOS_FILTRO_CAMPO` | `PARCIAL RELIGA CENEGED - MARICÁ` | Filtro salvo da Busca TdC |
+| `ARGOS_MUNICIPIO_CAMPO` | `MARICÁ` | Município das ordens em campo (sem diferenciar acento/caixa) |
+| `ARGOS_PREFIXO_EQUIPE_CAMPO` | `NI2` | Prefixo do `Código Equipe` das equipes da CENEGED |
 | `ARGOS_INTERVALO_CAMPO_MIN` | `30` | Intervalo entre exportações |
 | `ARGOS_CAMPO_DIAS_ATRAS` | `7` | Data de lançamento: de N dias atrás até hoje |
 | `ARGOS_ID_DATA_LANC_INICIO` / `_FIM` | `698246` / `698247` | IDs dos campos de data. Ajuste se o eOrder mudar |
