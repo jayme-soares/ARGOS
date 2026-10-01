@@ -665,26 +665,35 @@ function renderTabela(campo, programaveis, agora) {
 // ------------------------------------------------------------------
 // RELATÓRIO (XLSX)
 // ------------------------------------------------------------------
-// Uma planilha com duas abas (Em campo e Programáveis), cada uma com as
-// ordens como aparecem no painel (filtros e ordenação daquela aba).
-// A SheetJS só é baixada no primeiro clique.
-const URL_SHEETJS = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+// Uma planilha formatada com duas abas (Em campo e Programáveis), cada uma
+// com as ordens como aparecem no painel (filtros e ordenação daquela aba).
+// A ExcelJS só é baixada no primeiro clique.
+const URL_EXCELJS = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
 const fmtCompleto = new Intl.DateTimeFormat("pt-BR", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const partesData = (d) => Object.fromEntries(fmtCompleto.formatToParts(d).map((p) => [p.type, p.value]));
 const NOME_URGENCIA = {
   vencida: "Vencida", critico: "Vence em até 30 min", alerta: "Vence em até 1h",
   atencao: "Vence em até 2h", ok: "No prazo", sem: "Sem prazo",
 };
+// Mesmas cores do tema claro do painel (styles.css): [texto, fundo].
+const COR = {
+  texto: "18202B", texto2: "5B6573", borda: "DFE2E8", cabecalho: "0F1720", marca: "E8B64C",
+  vencida: ["D63A3A", "FDEAEA"], critico: ["E5731F", "FDF0E5"], alerta: ["A27C05", "FCF6DC"],
+  atencao: ["2F6FD6", "E8F0FC"], ok: ["2F9A5D", "E5F5EC"], sem: ["8A93A0", "ECEEF2"],
+};
+const argb = (rgb) => ({ argb: `FF${rgb}` });
+const preenchimento = (rgb) => ({ type: "pattern", pattern: "solid", fgColor: argb(rgb) });
 
-// Célula de data do Excel com o horário de Brasília, independente do fuso
-// do computador de quem exporta.
-function celulaData(d) {
+// A ExcelJS grava datas em UTC; passar o relógio de Brasília "como UTC"
+// deixa a célula no horário certo, independente do fuso do computador.
+function dataBrasilia(d) {
   if (!d) return null;
   const p = partesData(d);
-  const utc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
-  return { t: "n", v: utc / 86400000 + 25569, z: "dd/mm/yyyy hh:mm" };
+  return new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute));
 }
 
+// [rótulo, valor, tipo] — "data" formata como dd/mm/aaaa hh:mm e
+// "urgencia" pinta a célula com a cor da situação.
 const COLUNAS_RELATORIO = {
   campo: [
     ["Ordem", (r) => r.ordem],
@@ -695,9 +704,9 @@ const COLUNAS_RELATORIO = {
     ["Bairro", (r) => r.bairro],
     ["Endereço", (r) => r.endereco],
     ["Tipo", (r) => r.tipo],
-    ["Vencimento", (r) => celulaData(r._venc)],
-    ["Tempo restante", (r) => textoRestante(r._min)],
-    ["Situação", (r) => NOME_URGENCIA[r._urg]],
+    ["Vencimento", (r) => dataBrasilia(r._venc), "data"],
+    ["Tempo restante", (r) => textoRestante(r._min), "urgencia"],
+    ["Situação", (r) => NOME_URGENCIA[r._urg], "urgencia"],
   ],
   programaveis: [
     ["TdC", (r) => r.tdc],
@@ -706,31 +715,94 @@ const COLUNAS_RELATORIO = {
     ["Endereço", (r) => r.endereco],
     ["Tipo", (r) => r.tipo],
     ["Atividade", (r) => r.atividade],
-    ["Vencimento", (r) => celulaData(r._venc)],
-    ["Tempo restante", (r) => textoRestante(r._min)],
-    ["Situação", (r) => NOME_URGENCIA[r._urg]],
-    ["Entrou no painel", (r) => celulaData(data(r.primeiro_visto_em))],
+    ["Vencimento", (r) => dataBrasilia(r._venc), "data"],
+    ["Tempo restante", (r) => textoRestante(r._min), "urgencia"],
+    ["Situação", (r) => NOME_URGENCIA[r._urg], "urgencia"],
+    ["Entrou no painel", (r) => dataBrasilia(data(r.primeiro_visto_em)), "data"],
   ],
 };
 
-let sheetjs = null;
-function carregarSheetJS() {
-  sheetjs ??= new Promise((ok, falha) => {
-    const s = Object.assign(document.createElement("script"), { src: URL_SHEETJS, onload: () => ok(window.XLSX) });
-    s.onerror = () => { sheetjs = null; s.remove(); falha(new Error("não foi possível carregar o gerador de planilhas")); };
+let exceljs = null;
+function carregarExcelJS() {
+  exceljs ??= new Promise((ok, falha) => {
+    const s = Object.assign(document.createElement("script"), { src: URL_EXCELJS, onload: () => ok(window.ExcelJS) });
+    s.onerror = () => { exceljs = null; s.remove(); falha(new Error("não foi possível carregar o gerador de planilhas")); };
     document.head.append(s);
   });
-  return sheetjs;
+  return exceljs;
 }
 
-function abaPlanilha(XLSX, colunas, linhas) {
-  const dados = [colunas.map(([rotulo]) => rotulo), ...linhas.map((r) => colunas.map(([, valor]) => valor(r) ?? ""))];
-  const ws = XLSX.utils.aoa_to_sheet(dados);
-  ws["!cols"] = colunas.map(([rotulo], i) => ({
-    wch: Math.min(60, Math.max(rotulo.length, ...dados.slice(1).map((l) => (l[i]?.z ? 16 : String(l[i]).length))) + 2),
-  }));
-  ws["!autofilter"] = { ref: ws["!ref"] };
-  return ws;
+function descreverFiltros(aba) {
+  const f = [];
+  if (estado.texto.trim()) f.push(`busca "${estado.texto.trim()}"`);
+  if (estado.urg) f.push($(`#filtro-urgencia [data-urg="${estado.urg}"]`)?.textContent || estado.urg);
+  if (aba === "campo" && estado.equipe) f.push(`equipe ${estado.equipe}`);
+  if (aba === "campo" && estado.bairro) f.push(`bairro ${estado.bairro}`);
+  return f.length ? `Filtros: ${f.join(", ")}` : "Sem filtros";
+}
+
+// Título e resumo nas linhas 1–2, cabeçalho fixo na linha 3, dados a partir da 4.
+function abaPlanilha(wb, nome, titulo, resumo, colunas, linhas) {
+  const ws = wb.addWorksheet(nome, {
+    views: [{ state: "frozen", ySplit: 3, showGridLines: false }],
+    pageSetup: { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+  });
+  const n = colunas.length;
+  const valores = linhas.map((r) => colunas.map(([, valor]) => valor(r) ?? ""));
+
+  ws.mergeCells(1, 1, 1, n);
+  Object.assign(ws.getCell(1, 1), { value: titulo, font: { bold: true, size: 15, color: argb(COR.texto) } });
+  ws.getRow(1).height = 26;
+  ws.mergeCells(2, 1, 2, n);
+  Object.assign(ws.getCell(2, 1), { value: resumo, font: { size: 10, color: argb(COR.texto2) } });
+  ws.getRow(2).height = 18;
+
+  const cab = ws.getRow(3);
+  cab.values = colunas.map(([rotulo]) => rotulo);
+  cab.height = 22;
+  cab.eachCell((c) => {
+    c.font = { bold: true, color: argb("FFFFFF") };
+    c.fill = preenchimento(COR.cabecalho);
+    c.alignment = { vertical: "middle" };
+    c.border = { bottom: { style: "medium", color: argb(COR.marca) } };
+  });
+
+  linhas.forEach((r, i) => {
+    const [corForte, corFundo] = COR[r._urg] || COR.sem;
+    ws.addRow(valores[i]).eachCell({ includeEmpty: true }, (c, col) => {
+      const tipo = colunas[col - 1][2];
+      c.border = { bottom: { style: "thin", color: argb(COR.borda) } };
+      c.alignment = { vertical: "middle" };
+      c.font = { color: argb(COR.texto) };
+      if (r._urg === "vencida") c.fill = preenchimento(corFundo);  // linha inteira, como no painel
+      if (tipo === "data") c.numFmt = "dd/mm/yyyy hh:mm";
+      if (tipo === "urgencia") {
+        c.font = { bold: true, color: argb(corForte) };
+        c.fill = preenchimento(corFundo);
+      }
+    });
+  });
+
+  if (linhas.length) {
+    ws.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3 + linhas.length, column: n } };
+  } else {
+    ws.mergeCells(4, 1, 4, n);
+    Object.assign(ws.getCell(4, 1), { value: "Nenhuma ordem.", font: { italic: true, color: argb(COR.texto2) } });
+  }
+
+  colunas.forEach(([rotulo, , tipo], i) => {
+    const maior = Math.max(rotulo.length + 3, ...valores.map((l) => String(l[i]).length));
+    ws.getColumn(i + 1).width = tipo === "data" ? 17 : Math.min(50, maior + 2);
+  });
+}
+
+function baixarArquivo(blob, nome) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: nome });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function exportarRelatorio() {
@@ -742,15 +814,23 @@ async function exportarRelatorio() {
   const btn = $("#btn-exportar");
   btn.disabled = true;
   try {
-    const XLSX = await carregarSheetJS();
-    const wb = XLSX.utils.book_new();
-    for (const [aba, nome] of [["campo", "Em campo"], ["programaveis", "Programáveis"]]) {
+    const ExcelJS = await carregarExcelJS();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "ARGOS";
+    wb.created = agora;
+    const geradoEm = fmtCompleto.format(agora).replace(",", "");
+    for (const [aba, nome, titulo] of [["campo", "Em campo", "Religas em campo"], ["programaveis", "Programáveis", "Religas programáveis"]]) {
       const linhas = linhasDaAba(campo, programaveis, aba);
-      XLSX.utils.book_append_sheet(wb, abaPlanilha(XLSX, COLUNAS_RELATORIO[aba], linhas), nome);
+      const resumo = `Gerado em ${geradoEm} · ${linhas.length} ${linhas.length === 1 ? "ordem" : "ordens"} · ${descreverFiltros(aba)}`;
+      abaPlanilha(wb, nome, titulo, resumo, COLUNAS_RELATORIO[aba], linhas);
     }
+    const buffer = await wb.xlsx.writeBuffer();
     // ":" não pode em nome de arquivo no Windows, então a hora vai como 14h30.
     const p = partesData(agora);
-    XLSX.writeFile(wb, `Religas - ${p.day}-${p.month}-${p.year} ${p.hour}h${p.minute}.xlsx`);
+    baixarArquivo(
+      new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+      `Religas - ${p.day}-${p.month}-${p.year} ${p.hour}h${p.minute}.xlsx`,
+    );
   } catch (e) {
     alert(`Não foi possível gerar o relatório: ${e.message || e}`);
   } finally {
