@@ -583,10 +583,10 @@ function agruparPorEquipe(campo) {
   return [...grupos.values()].map((g) => ({ ...g, _urg: g.vencidas ? "vencida" : classificar(g._min) }));
 }
 
-function filtrar(linhas) {
+function filtrar(linhas, aba = estado.aba) {
   const termo = estado.texto.trim().toLowerCase();
   return linhas.filter((r) => {
-    if (estado.aba === "campo") {
+    if (aba === "campo") {
       if (estado.equipe && (r.equipe || "") !== estado.equipe) return false;
       if (estado.bairro && (r.bairro || "") !== estado.bairro) return false;
     }
@@ -599,8 +599,8 @@ function filtrar(linhas) {
   });
 }
 
-function ordenar(linhas, colunas) {
-  const { col, dir } = estado.ordem[estado.aba];
+function ordenar(linhas, colunas, aba = estado.aba) {
+  const { col, dir } = estado.ordem[aba];
   const def = colunas.find((c) => c.id === col) || colunas[0];
   return [...linhas].sort((a, b) => {
     const va = def.valor(a);
@@ -613,14 +613,19 @@ function ordenar(linhas, colunas) {
   });
 }
 
+// Linhas de uma aba já filtradas e ordenadas, como aparecem na tabela.
+function linhasDaAba(campo, programaveis, aba = estado.aba) {
+  let linhas;
+  if (aba === "campo") linhas = filtrar(campo, aba);
+  else if (aba === "programaveis") linhas = filtrar(programaveis, aba);
+  else if (aba === "acessos") linhas = estado.acessos.map((a) => ({ ...a, _urg: a.status === "pendente" ? "alerta" : a.status === "recusado" ? "sem" : "ok" }));
+  else linhas = agruparPorEquipe(campo);
+  return ordenar(linhas, COLUNAS[aba], aba);
+}
+
 function renderTabela(campo, programaveis, agora) {
   const colunas = COLUNAS[estado.aba];
-  let linhas;
-  if (estado.aba === "campo") linhas = filtrar(campo);
-  else if (estado.aba === "programaveis") linhas = filtrar(programaveis);
-  else if (estado.aba === "acessos") linhas = estado.acessos.map((a) => ({ ...a, _urg: a.status === "pendente" ? "alerta" : a.status === "recusado" ? "sem" : "ok" }));
-  else linhas = agruparPorEquipe(campo);
-  linhas = ordenar(linhas, colunas);
+  const linhas = linhasDaAba(campo, programaveis);
 
   const { col, dir } = estado.ordem[estado.aba];
   $("#tabela-cabecalho").innerHTML = `<tr>${colunas.map((c) => {
@@ -654,6 +659,102 @@ function renderTabela(campo, programaveis, agora) {
       vazio.hidden = false;
       vazio.textContent = `O eOrder informa ${total} programáveis; exibindo as ${programaveis.length} da primeira página.`;
     }
+  }
+}
+
+// ------------------------------------------------------------------
+// RELATÓRIO (XLSX)
+// ------------------------------------------------------------------
+// Uma planilha com duas abas (Em campo e Programáveis), cada uma com as
+// ordens como aparecem no painel (filtros e ordenação daquela aba).
+// A SheetJS só é baixada no primeiro clique.
+const URL_SHEETJS = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+const fmtCompleto = new Intl.DateTimeFormat("pt-BR", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const partesData = (d) => Object.fromEntries(fmtCompleto.formatToParts(d).map((p) => [p.type, p.value]));
+const NOME_URGENCIA = {
+  vencida: "Vencida", critico: "Vence em até 30 min", alerta: "Vence em até 1h",
+  atencao: "Vence em até 2h", ok: "No prazo", sem: "Sem prazo",
+};
+
+// Célula de data do Excel com o horário de Brasília, independente do fuso
+// do computador de quem exporta.
+function celulaData(d) {
+  if (!d) return null;
+  const p = partesData(d);
+  const utc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+  return { t: "n", v: utc / 86400000 + 25569, z: "dd/mm/yyyy hh:mm" };
+}
+
+const COLUNAS_RELATORIO = {
+  campo: [
+    ["Ordem", (r) => r.ordem],
+    ["TdC", (r) => r.tdc],
+    ["Cliente", (r) => r.cliente],
+    ["Nome do cliente", (r) => r.nome_cliente],
+    ["Equipe", (r) => r.equipe],
+    ["Bairro", (r) => r.bairro],
+    ["Endereço", (r) => r.endereco],
+    ["Tipo", (r) => r.tipo],
+    ["Vencimento", (r) => celulaData(r._venc)],
+    ["Tempo restante", (r) => textoRestante(r._min)],
+    ["Situação", (r) => NOME_URGENCIA[r._urg]],
+  ],
+  programaveis: [
+    ["TdC", (r) => r.tdc],
+    ["Ordem", (r) => r.ordem],
+    ["Cliente", (r) => r.cliente],
+    ["Endereço", (r) => r.endereco],
+    ["Tipo", (r) => r.tipo],
+    ["Atividade", (r) => r.atividade],
+    ["Vencimento", (r) => celulaData(r._venc)],
+    ["Tempo restante", (r) => textoRestante(r._min)],
+    ["Situação", (r) => NOME_URGENCIA[r._urg]],
+    ["Entrou no painel", (r) => celulaData(data(r.primeiro_visto_em))],
+  ],
+};
+
+let sheetjs = null;
+function carregarSheetJS() {
+  sheetjs ??= new Promise((ok, falha) => {
+    const s = Object.assign(document.createElement("script"), { src: URL_SHEETJS, onload: () => ok(window.XLSX) });
+    s.onerror = () => { sheetjs = null; s.remove(); falha(new Error("não foi possível carregar o gerador de planilhas")); };
+    document.head.append(s);
+  });
+  return sheetjs;
+}
+
+function abaPlanilha(XLSX, colunas, linhas) {
+  const dados = [colunas.map(([rotulo]) => rotulo), ...linhas.map((r) => colunas.map(([, valor]) => valor(r) ?? ""))];
+  const ws = XLSX.utils.aoa_to_sheet(dados);
+  ws["!cols"] = colunas.map(([rotulo], i) => ({
+    wch: Math.min(60, Math.max(rotulo.length, ...dados.slice(1).map((l) => (l[i]?.z ? 16 : String(l[i]).length))) + 2),
+  }));
+  ws["!autofilter"] = { ref: ws["!ref"] };
+  return ws;
+}
+
+async function exportarRelatorio() {
+  if (!estado.snapshot) return;
+  const agora = new Date();
+  const campo = enriquecer(estado.snapshot.campo?.registros, agora);
+  const programaveis = enriquecer(estado.snapshot.programaveis?.registros, agora);
+
+  const btn = $("#btn-exportar");
+  btn.disabled = true;
+  try {
+    const XLSX = await carregarSheetJS();
+    const wb = XLSX.utils.book_new();
+    for (const [aba, nome] of [["campo", "Em campo"], ["programaveis", "Programáveis"]]) {
+      const linhas = linhasDaAba(campo, programaveis, aba);
+      XLSX.utils.book_append_sheet(wb, abaPlanilha(XLSX, COLUNAS_RELATORIO[aba], linhas), nome);
+    }
+    // ":" não pode em nome de arquivo no Windows, então a hora vai como 14h30.
+    const p = partesData(agora);
+    XLSX.writeFile(wb, `Religas - ${p.day}-${p.month}-${p.year} ${p.hour}h${p.minute}.xlsx`);
+  } catch (e) {
+    alert(`Não foi possível gerar o relatório: ${e.message || e}`);
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -714,6 +815,7 @@ $("#filtro-urgencia").addEventListener("click", (ev) => {
 });
 
 $("#btn-atualizar").addEventListener("click", () => buscarSnapshot());
+$("#btn-exportar").addEventListener("click", exportarRelatorio);
 $("#btn-sair").addEventListener("click", () => sair());
 $("#aba-acessos").addEventListener("click", () => carregarAcessos().then(renderizar));
 $("#btn-tema").addEventListener("click", () => {
