@@ -20,6 +20,7 @@ from argos.eorder.busca_tdc import exportar_religas_em_campo
 from argos.eorder.driver import abrir_driver, fechar_driver
 from argos.eorder.programaveis import (
     extrair_registros,
+    filtrar_municipio,
     navegar_ate_atividades_programaveis,
     obter_total_declarado,
     preencher_busca,
@@ -92,10 +93,15 @@ class MonitorProgramaveis(threading.Thread):
         agora = _agora()
         preencher_busca(driver, proximo_dia_util(agora, dias_uteis=config.DIAS_UTEIS_PRAZO))
 
-        registros = extrair_registros(driver)
+        brutos = extrair_registros(driver)
+        registros = filtrar_municipio(brutos)
         quantidade = obter_total_declarado(driver)
-        if quantidade is None:
+        if quantidade is None or quantidade <= len(brutos):
             quantidade = len(registros)
+        else:
+            # Há outras páginas que não são lidas: o total do eOrder inclui
+            # outros municípios; desconta ao menos os da primeira página.
+            quantidade -= len(brutos) - len(registros)
 
         # Estado persistido no volume: um restart do container NÃO faz tudo
         # parecer novo. None só na primeira execução de todas.

@@ -18,7 +18,7 @@ VPS Hostinger (Docker)                          Vercel
 
 **Programáveis** (a cada 1 min):
 - Caminho no eOrder: Plano Diário → Atividades Programáveis → busca salva "CENEGED RELIGAÇÃO MARICA".
-- Mostra no painel as religações disponíveis para designar.
+- Mostra no painel as religações disponíveis para designar, só do município de Maricá (a busca traz o Centro Operativo inteiro, com Niterói; o município sai do fim do endereço).
 - Envia um push quando entra uma religação nova.
 
 **Em campo** (a cada 30 min):
@@ -157,7 +157,7 @@ Todas as opções estão comentadas em [`.env.example`](.env.example). As princi
 | Variável | Padrão | Uso |
 |---|---|---|
 | `ARGOS_FILTRO_CAMPO` | `PARCIAL RELIGA CENEGED - MARICÁ` | Filtro salvo da Busca TdC |
-| `ARGOS_MUNICIPIO_CAMPO` | `MARICÁ` | Município das ordens em campo (sem diferenciar acento/caixa) |
+| `ARGOS_MUNICIPIO_CAMPO` | `MARICÁ` | Município das ordens em campo e das programáveis (sem diferenciar acento/caixa) |
 | `ARGOS_PREFIXO_EQUIPE_CAMPO` | `NI2` | Prefixo do `Código Equipe` das equipes da CENEGED |
 | `ARGOS_INTERVALO_CAMPO_MIN` | `30` | Intervalo entre exportações |
 | `ARGOS_CAMPO_DIAS_ATRAS` | `7` | Data de lançamento: de N dias atrás até hoje |

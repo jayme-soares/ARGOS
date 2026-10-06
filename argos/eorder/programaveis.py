@@ -16,6 +16,7 @@ from argos.eorder.ui import (
     debug_screenshot,
     encontrar_elemento_visivel,
     esperar_e_clicar_visivel,
+    normalizar_texto,
 )
 
 
@@ -30,6 +31,20 @@ def proximo_dia_util(a_partir_de: datetime, dias_uteis: int = 1) -> datetime:
         if d.weekday() < 5:  # 0-4 = seg-sex
             contados += 1
     return d.replace(hour=16, minute=0, second=0, microsecond=0)
+
+
+def municipio_do_endereco(endereco: str | None) -> str:
+    """Município no fim do endereço da grade: "RUA X 10 - BAIRRO, MARICA - RJ"
+    -> "MARICA". A grade de Programáveis não tem coluna de município."""
+    trecho = (endereco or "").rsplit(",", 1)[-1]
+    return trecho.rsplit(" - ", 1)[0].strip()
+
+
+def filtrar_municipio(registros: list[dict]) -> list[dict]:
+    """A busca salva traz ordens de todo o Centro Operativo (Niterói também);
+    só ficam as do município configurado (config.MUNICIPIO_CAMPO)."""
+    alvo = normalizar_texto(config.MUNICIPIO_CAMPO)
+    return [r for r in registros if normalizar_texto(municipio_do_endereco(r.get("endereco"))) == alvo]
 
 
 def navegar_ate_atividades_programaveis(driver):
