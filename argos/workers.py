@@ -15,7 +15,7 @@ import threading
 from datetime import datetime, timedelta
 
 from argos import config, publicador, saude
-from argos.alertas import formatar_duracao, linha_push, processar_alertas
+from argos.alertas import PROGRAMAVEIS, formatar_duracao, linha_push, processar_alertas
 from argos.eorder.busca_tdc import exportar_religas_em_campo
 from argos.eorder.driver import abrir_driver, fechar_driver
 from argos.eorder.programaveis import (
@@ -138,6 +138,8 @@ class MonitorProgramaveis(threading.Thread):
             ],
         })
 
+        self._avaliar_alertas_vencimento(registros, agora, parcial=quantidade > len(registros))
+
         vencimentos = [r["vencimento_iso"] for r in registros if r["vencimento_iso"]]
         venc_txt = ""
         if vencimentos:
@@ -169,6 +171,21 @@ class MonitorProgramaveis(threading.Thread):
             tags=["rotating_light"],
         )
         return texto
+
+    def _avaliar_alertas_vencimento(self, registros, agora, parcial):
+        """Pushes de vencimento das programáveis (2h, 1h, 30, 15 min e vencida).
+        Uma falha aqui não pode derrubar a checagem nem o push de novas."""
+        try:
+            avisos = processar_alertas(
+                [{"tdc": r["codigo_tdc"], "vencimento": r["vencimento_iso"]} for r in registros],
+                agora,
+                categoria=PROGRAMAVEIS,
+                parcial=parcial,
+            )
+            for aviso in avisos:
+                log(f"Alerta: {aviso['titulo']}", self.PREFIXO)
+        except Exception as e:
+            log(f"ERRO ao avaliar alertas de vencimento: {e}", self.PREFIXO)
 
     def run(self):
         """Só liga o navegador dentro da janela permitida. Recuperação em 3

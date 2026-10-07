@@ -114,10 +114,10 @@ EXPORTACAO_TIMEOUT_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_TIMEOUT_SEG", 15 * 60)
 EXPORTACAO_POLLING_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_POLLING_SEG", 30)
 
 # --- Alertas de vencimento ---
-# Antecedências (em minutos) dos avisos de "vai vencer". Cada ordem recebe
-# cada aviso uma única vez.
+# Antecedências (em minutos) dos avisos de "vai vencer", para as ordens em
+# campo e para as programáveis. Cada ordem recebe cada aviso uma única vez.
 ALERTAS_MINUTOS = sorted(
-    {int(x) for x in (_env_str("ARGOS_ALERTAS_MIN", "60,30") or "").split(",") if x.strip()},
+    {int(x) for x in (_env_str("ARGOS_ALERTAS_MIN", "120,60,30,15") or "").split(",") if x.strip()},
     reverse=True,
 )
 LEMBRETE_VENCIDAS_MINUTOS = _env_int("ARGOS_LEMBRETE_VENCIDAS_MIN", 60)

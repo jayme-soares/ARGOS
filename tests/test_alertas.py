@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timedelta
 
-from argos.alertas import calcular_alertas
+from argos.alertas import PROGRAMAVEIS, calcular_alertas
 from argos.config import TIMEZONE
 
 T0 = datetime(2026, 9, 29, 10, 0, tzinfo=TIMEZONE)
@@ -71,6 +71,41 @@ class TestAlertas(unittest.TestCase):
         avisos, _ = self.avaliar([reg("A", 50)], 1, estado)  # vencimento mudou
         self.assertEqual(len(avisos), 1)
         self.assertIn("1h", avisos[0]["titulo"])
+
+    def test_niveis_padrao_2h_1h_30_15(self):
+        regs = [reg("A", 150)]
+        enviados = []
+        estado = None
+        for minuto in range(0, 160, 5):
+            avisos, estado = calcular_alertas(regs, T0 + timedelta(minutes=minuto), estado, antecedencias=[120, 60, 30, 15])
+            enviados += [a["titulo"] for a in avisos]
+        self.assertEqual(len(enviados), 5)
+        for trecho, titulo in zip(["em até 2h", "em até 1h", "em até 30 min", "em até 15 min", "VENCEU"], enviados):
+            self.assertIn(trecho, titulo)
+
+    def test_prioridade_maxima_ate_30_min(self):
+        avisos, _ = calcular_alertas([reg("A", 100), reg("B", 50), reg("C", 25), reg("D", 10)], T0, None,
+                                     antecedencias=[120, 60, 30, 15])
+        self.assertEqual([a["prioridade"] for a in avisos], [4, 4, 5, 5])
+
+    def test_programaveis(self):
+        avisos, estado = calcular_alertas([reg("A", 100), reg("D", -10)], T0, None,
+                                          antecedencias=[120, 60, 30, 15], categoria=PROGRAMAVEIS)
+        self.assertIn("1 programável vence em até 2h", avisos[0]["titulo"])
+        self.assertIn("VENCEU sem designar", avisos[1]["titulo"])
+        # Programáveis não têm lembrete periódico das vencidas.
+        avisos, _ = calcular_alertas([reg("D", -10)], T0 + timedelta(hours=2), estado,
+                                     antecedencias=[120, 60, 30, 15], categoria=PROGRAMAVEIS)
+        self.assertEqual(avisos, [])
+
+    def test_leitura_parcial_mantem_estado(self):
+        _, estado = self.avaliar([reg("A", 20), reg("B", 20)], 0, None)
+        # B não apareceu (ficou fora da 1ª página), mas a leitura é parcial.
+        _, estado = calcular_alertas([reg("A", 20)], T0 + timedelta(minutes=1), estado, antecedencias=[60, 30], parcial=True)
+        self.assertEqual(set(estado["ordens"]), {"A", "B"})
+        # B volta: não repete o aviso.
+        avisos, _ = self.avaliar([reg("A", 20), reg("B", 20)], 2, estado)
+        self.assertEqual(avisos, [])
 
     def test_sem_vencimento_ignorado(self):
         avisos, estado = self.avaliar([{"tdc": "X", "vencimento": None}], 0, None)

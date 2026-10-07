@@ -20,6 +20,7 @@ VPS Hostinger (Docker)                          Vercel
 - Caminho no eOrder: Plano Diário → Atividades Programáveis → busca salva "CENEGED RELIGAÇÃO MARICA".
 - Mostra no painel as religações disponíveis para designar, só do município de Maricá (a busca traz o Centro Operativo inteiro, com Niterói; o município sai do fim do endereço).
 - Envia um push quando entra uma religação nova.
+- Envia pushes de vencimento das programáveis ainda não designadas (ver abaixo).
 
 **Em campo** (a cada 30 min):
 - Caminho no eOrder: Lista TdC → Busca TdC → filtro "PARCIAL RELIGA CENEGED - MARICÁ", com data de lançamento de 7 dias atrás até hoje.
@@ -34,11 +35,15 @@ VPS Hostinger (Docker)                          Vercel
   - vencimento (`Prazo ANS Legal`)
 - Só entram as ordens do município de Maricá cujo `Código Equipe` começa com `NI2` (equipes da CENEGED).
 
-**Pushes de vencimento** das ordens em campo. Os alertas são reavaliados a cada 5 min:
+**Pushes de vencimento**, em duas categorias: ordens em campo (reavaliadas a cada 5 min) e programáveis (a cada checagem de 1 min):
+- 2h antes do vencimento
 - 1h antes do vencimento
 - 30 min antes do vencimento
-- quando a ordem vence e continua em aberto
-- um lembrete com as vencidas em aberto a cada 1h
+- 15 min antes do vencimento
+- quando a ordem vence e continua em aberto (em campo: "sem finalizar"; programável: "sem designar")
+- só em campo: um lembrete com as vencidas em aberto a cada 1h
+
+Se a ordem já aparece num nível mais urgente (por exemplo, entra faltando 20 min), só esse nível dispara. Os avisos de 30 e 15 min e o de vencida ficam na tela até a pessoa tocar.
 
 Cada push lista só o TdC e a data/hora do vencimento; os detalhes ficam no painel.
 
@@ -60,7 +65,7 @@ Cada ordem recebe cada aviso uma única vez.
 | `web/` | Painel (Vercel). HTML/CSS/JS puro, sem build |
 | `tests/` | Testes da planilha e dos alertas |
 
-O estado fica no volume `/data`: `programaveis.json`, `alertas.json`, `snapshot.json`, `downloads/` e `debug/`, onde ficam os screenshots de erro. Por isso um restart do container não repete pushes.
+O estado fica no volume `/data`: `programaveis.json`, `alertas.json` (em campo), `alertas_programaveis.json`, `snapshot.json`, `downloads/` e `debug/`, onde ficam os screenshots de erro. Por isso um restart do container não repete pushes.
 
 ## Rodando localmente
 
@@ -162,7 +167,7 @@ Todas as opções estão comentadas em [`.env.example`](.env.example). As princi
 | `ARGOS_INTERVALO_CAMPO_MIN` | `30` | Intervalo entre exportações |
 | `ARGOS_CAMPO_DIAS_ATRAS` | `7` | Data de lançamento: de N dias atrás até hoje |
 | `ARGOS_ID_DATA_LANC_INICIO` / `_FIM` | `698246` / `698247` | IDs dos campos de data. Ajuste se o eOrder mudar |
-| `ARGOS_ALERTAS_MIN` | `60,30` | Antecedências dos avisos |
+| `ARGOS_ALERTAS_MIN` | `120,60,30,15` | Antecedências dos avisos de vencimento (em campo e programáveis) |
 | `ARGOS_MODO_SEQUENCIAL` | `0` | `1` se o eOrder não aceitar duas sessões simultâneas do mesmo usuário |
 
 ## Limitações conhecidas
