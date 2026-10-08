@@ -3,6 +3,34 @@
 // (tabela public.argos_acessos — ver supabase/migrations).
 const KEY = process.env.ARGOS_SNAPSHOT_KEY || "argos:snapshot";
 
+const normalizarEquipe = (e) => String(e || "").replace(/\s+/g, "").toUpperCase();
+
+// Equipes de campo só recebem as próprias ordens (em aberto e finalizadas),
+// sem as programáveis: o filtro é feito aqui no servidor para que nenhuma
+// equipe receba dados de clientes de outra.
+function snapshotDaEquipe(snapshot, equipe) {
+  const minha = (r) => normalizarEquipe(r.equipe) === equipe;
+  const campo = snapshot.campo || {};
+  return {
+    versao: snapshot.versao,
+    gerado_em: snapshot.gerado_em,
+    janela: snapshot.janela,
+    status: snapshot.status,
+    config: {
+      intervalo_campo_min: snapshot.config?.intervalo_campo_min,
+      alertas_min: snapshot.config?.alertas_min,
+      push_chave_publica: snapshot.config?.push_chave_publica,
+    },
+    equipe,
+    campo: {
+      atualizado_em: campo.atualizado_em,
+      proxima_extracao: campo.proxima_extracao,
+      registros: (campo.registros || []).filter(minha),
+      finalizadas: (campo.finalizadas || []).filter(minha),
+    },
+  };
+}
+
 // Valida o token chamando a RPC com o próprio JWT do usuário: o PostgREST do
 // Supabase rejeita token inválido/expirado (401), e a função devolve o
 // status de acesso de auth.uid(). Uma chamada resolve as duas coisas.
@@ -47,6 +75,10 @@ export default async function handler(req, res) {
   if (acesso.status !== "aprovado") {
     return res.status(403).json({ erro: "Acesso ainda não aprovado.", status: acesso.status || "sem_solicitacao" });
   }
+  const ehEquipe = acesso.papel === "equipe";
+  if (ehEquipe && acesso.trocar_senha) {
+    return res.status(403).json({ erro: "Defina uma nova senha para continuar.", status: "trocar_senha" });
+  }
 
   try {
     const r = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(KEY)}`, {
@@ -60,6 +92,9 @@ export default async function handler(req, res) {
       return res.status(404).json({ erro: "O bot ainda não publicou nenhum dado." });
     }
     res.setHeader("Content-Type", "application/json; charset=utf-8");
+    if (ehEquipe) {
+      return res.status(200).send(JSON.stringify(snapshotDaEquipe(JSON.parse(result), normalizarEquipe(acesso.equipe))));
+    }
     return res.status(200).send(result);
   } catch (e) {
     return res.status(502).json({ erro: `Falha ao ler o Upstash: ${e.message}` });
