@@ -5,18 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#0f1720">
-  <title>ARGOS · Religações</title>
+  <title>ARGOS · Equipe</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="manifest" href="manifest-equipe.webmanifest">
   <link rel="apple-touch-icon" href="icones/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="ARGOS">
+  <meta name="apple-mobile-web-app-title" content="ARGOS Equipe">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Syne:wght@500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="pagina-equipe">
   <!-- Símbolo do ARGOS (design "ARGOS — Logo"): pontos na cor do texto, centro na cor da marca. -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <symbol id="argos-simbolo" viewBox="0 50 200 100">
@@ -24,33 +24,30 @@
       <circle cx="100" cy="100" r="9" style="fill: var(--marca)"/>
     </symbol>
   </svg>
-  <!-- LOGIN -->
+  <!-- LOGIN (código da equipe + senha) -->
   <main id="tela-login" class="login" hidden>
     <form id="form-login" class="login-card" autocomplete="on">
       <div class="marca marca-grande">
         <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
         <div>
           <strong>ARGOS</strong>
-          <small>Religações · Maricá</small>
+          <small>Equipes de campo · Maricá</small>
         </div>
       </div>
-      <label data-so-cadastro hidden>Nome
-        <input id="login-nome" name="name" type="text" autocomplete="name" required disabled>
-      </label>
-      <label>Email
-        <input id="login-email" name="email" type="email" autocomplete="username" required>
+      <label>Código da equipe
+        <input id="login-codigo" name="username" type="text" autocomplete="username" autocapitalize="characters" spellcheck="false" placeholder="NI2…" required>
       </label>
       <label>Senha
         <input id="login-senha" name="password" type="password" autocomplete="current-password" required>
       </label>
       <label data-so-cadastro hidden>Confirme a senha
-        <input id="login-senha2" name="password2" type="password" autocomplete="new-password" minlength="6" required disabled>
+        <input id="login-senha2" name="password2" type="password" autocomplete="new-password" minlength="8" required disabled>
       </label>
       <button id="btn-login" type="submit" class="btn-primario">Entrar</button>
       <p id="login-erro" class="login-erro" role="alert"></p>
       <p id="login-dica" class="login-dica"></p>
       <button id="btn-alternar-cadastro" type="button" class="btn-link"></button>
-      <a class="btn-link link-equipe-login" href="/equipe">Sou equipe de campo (entrar com o código NI2)</a>
+      <button id="btn-esqueci" type="button" class="btn-link">Esqueci a senha</button>
     </form>
   </main>
 
@@ -61,25 +58,49 @@
         <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
         <div>
           <strong>ARGOS</strong>
-          <small>Religações · Maricá</small>
+          <small>Equipes de campo · Maricá</small>
         </div>
       </div>
       <h2 id="espera-titulo" class="espera-titulo"></h2>
       <p id="espera-texto" class="espera-texto"></p>
-      <p class="secundario">Conectado como <b id="espera-email"></b></p>
+      <p class="secundario">Equipe <b id="espera-equipe"></b></p>
       <button id="btn-verificar" class="btn-primario">Verificar novamente</button>
       <button id="btn-sair-espera" class="btn-texto">Sair</button>
     </div>
   </main>
 
-  <!-- PAINEL -->
+  <!-- TROCAR A SENHA TEMPORÁRIA -->
+  <main id="tela-senha" class="login" hidden>
+    <form id="form-senha" class="login-card">
+      <div class="marca marca-grande">
+        <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
+        <div>
+          <strong>ARGOS</strong>
+          <small>Equipes de campo · Maricá</small>
+        </div>
+      </div>
+      <h2 class="espera-titulo">Defina uma nova senha</h2>
+      <p class="espera-texto">A senha atual é temporária, criada pelo administrador. Escolha uma senha nova para a equipe (mínimo 8 caracteres).</p>
+      <label>Nova senha
+        <input id="senha-nova" type="password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <label>Confirme a nova senha
+        <input id="senha-nova2" type="password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <button type="submit" class="btn-primario">Salvar senha</button>
+      <p id="senha-erro" class="login-erro" role="alert"></p>
+      <button id="btn-sair-senha" type="button" class="btn-texto">Sair</button>
+    </form>
+  </main>
+
+  <!-- PAINEL DA EQUIPE -->
   <div id="tela-painel" hidden>
     <header class="topo">
       <div class="marca">
         <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
         <div>
           <strong>ARGOS</strong>
-          <small>Religações · Maricá</small>
+          <small id="nome-equipe">Equipe</small>
         </div>
       </div>
       <div class="status" id="status"></div>
@@ -93,64 +114,54 @@
         <button id="btn-tema" class="btn-icone" title="Alternar tema" aria-label="Alternar tema">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
         </button>
-        <span id="usuario-atual" class="usuario-atual"></span>
         <button id="btn-sair" class="btn-texto">Sair</button>
       </div>
     </header>
 
-    <section id="extracao" class="extracao" aria-label="Extração dos dados de campo" hidden></section>
+    <div id="faixa-push" class="faixa-push" hidden>
+      <span>Ative as notificações neste celular para receber as religas designadas e os alertas de vencimento.</span>
+      <button id="btn-faixa-push" class="btn-primario">Ativar</button>
+    </div>
+
+    <section id="extracao" class="extracao" aria-label="Atualização dos dados" hidden></section>
 
     <div id="avisos" class="avisos"></div>
 
     <section class="kpis" id="kpis" aria-label="Indicadores"></section>
 
     <nav class="abas" role="tablist">
-      <button role="tab" data-aba="campo" class="aba">Em campo <span class="contador" id="cont-campo">0</span></button>
-      <button role="tab" data-aba="programaveis" class="aba">Programáveis <span class="contador" id="cont-programaveis">0</span></button>
-      <button role="tab" data-aba="finalizadas" class="aba" title="Finalizadas hoje">Finalizadas <span class="contador" id="cont-finalizadas">0</span></button>
-      <button role="tab" data-aba="equipes" class="aba">Por equipe <span class="contador" id="cont-equipes">0</span></button>
-      <button role="tab" data-aba="acessos" class="aba" id="aba-acessos" hidden>Acessos <span class="contador" id="cont-acessos">0</span></button>
+      <button role="tab" data-aba="abertas" class="aba">Em aberto <span class="contador" id="cont-abertas">0</span></button>
+      <button role="tab" data-aba="finalizadas" class="aba">Finalizadas <span class="contador" id="cont-finalizadas">0</span></button>
     </nav>
 
-    <section class="filtros" id="filtros">
-      <div class="busca">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="filtro-texto" type="search" placeholder="Buscar ordem, TdC, cliente, endereço…">
-      </div>
-      <select id="filtro-equipe" aria-label="Filtrar por equipe"><option value="">Todas as equipes</option></select>
-      <select id="filtro-bairro" aria-label="Filtrar por bairro"><option value="">Todos os bairros</option></select>
-      <div class="chips" id="filtro-urgencia" role="group" aria-label="Filtrar por urgência">
-        <button data-urg="" class="chip">Todas</button>
-        <button data-urg="vencida" class="chip chip-vencida">Vencidas</button>
-        <button data-urg="critico" class="chip chip-critico">≤ 30 min</button>
-        <button data-urg="alerta" class="chip chip-alerta">≤ 1h</button>
-        <button data-urg="atencao" class="chip chip-atencao">≤ 2h</button>
-      </div>
-      <div class="chips" id="filtro-periodo" role="group" aria-label="Período das finalizadas" hidden>
+    <section class="filtros" id="filtro-periodo-wrap" hidden>
+      <div class="chips" id="filtro-periodo" role="group" aria-label="Período das finalizadas">
         <button data-periodo="hoje" class="chip">Hoje</button>
         <button data-periodo="" class="chip">Últimos 7 dias</button>
       </div>
-      <button id="btn-exportar" class="btn-texto btn-exportar" title="Baixar relatório (Excel) das ordens exibidas">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
-        Exportar relatório
-      </button>
     </section>
 
-    <section class="tabela-wrap">
-      <table class="tabela" id="tabela">
-        <thead id="tabela-cabecalho"></thead>
-        <tbody id="tabela-corpo"></tbody>
-      </table>
-      <p class="vazio" id="vazio" hidden></p>
-    </section>
+    <section id="lista" class="eq-lista" aria-live="polite"></section>
+    <p class="vazio" id="vazio" hidden></p>
 
     <footer class="rodape">
       <span id="rodape-info"></span>
     </footer>
   </div>
 
+  <!-- CONFIRMAÇÃO OBRIGATÓRIA DOS AVISOS -->
+  <div id="modal-avisos" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-titulo" hidden>
+    <div class="modal-card">
+      <h2 id="modal-titulo" class="modal-titulo"></h2>
+      <p class="secundario">Leia os avisos abaixo e confirme. O painel fica bloqueado até a confirmação, e ela fica registrada para a coordenação.</p>
+      <ul id="modal-lista" class="modal-lista"></ul>
+      <button id="btn-confirmar-avisos" class="btn-primario">Confirmo que visualizei</button>
+      <p id="modal-erro" class="login-erro" role="alert"></p>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="comum.js"></script>
-  <script src="app.js"></script>
+  <script src="equipe.js"></script>
 </body>
 </html>

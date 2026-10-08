@@ -300,6 +300,52 @@ button.kpi:hover { border-color: var(--texto-3); }
 
 .rodape { padding: 0 24px 24px; color: var(--texto-3); font-size: 12px; }
 
+/* ---------- PAINEL DA EQUIPE (/equipe) ---------- */
+.link-equipe-login { text-align: center; }
+.faixa-push {
+  display: flex; align-items: center; gap: 12px; margin: 12px 24px 0; padding: 10px 14px;
+  border-radius: var(--raio); border: 1px solid color-mix(in srgb, var(--marca) 45%, transparent);
+  background: color-mix(in srgb, var(--marca) 10%, var(--bg-elev)); font-size: 13px;
+}
+.faixa-push span { flex: 1; }
+.faixa-push .btn-primario { flex: none; padding: 8px 14px; }
+.eq-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; padding: 14px 24px 16px; }
+.eq-card {
+  display: grid; gap: 4px; align-content: start; min-width: 0;
+  background: var(--bg-elev); border: 1px solid var(--borda); border-radius: var(--raio); padding: 12px 14px 12px 18px;
+  box-shadow: inset 4px 0 0 var(--cor-linha, transparent), var(--sombra);
+}
+.eq-card.u-vencida { background: var(--vencida-bg); }
+.eq-linha { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.eq-ids { justify-content: flex-start; gap: 16px; color: var(--texto-2); font-size: 13px; }
+.eq-ids b { color: var(--texto); }
+.eq-contagem { font-size: 18px; font-weight: 600; color: var(--cor-linha); }
+.eq-vencimento { font-size: 13px; color: var(--texto-2); }
+.eq-vencimento b { color: var(--texto); }
+.eq-endereco { font-weight: 500; overflow-wrap: anywhere; }
+.eq-mapa { justify-self: start; margin-top: 4px; font-size: 13px; color: var(--atencao); }
+
+body.bloqueado { overflow: hidden; }
+.modal {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px;
+  background: color-mix(in srgb, #0b1118 72%, transparent); backdrop-filter: blur(3px);
+}
+.modal-card {
+  width: 100%; max-width: 480px; max-height: calc(100vh - 32px); overflow: auto; display: grid; gap: 12px;
+  background: var(--bg-elev); border: 1px solid var(--borda); border-radius: 14px; padding: 20px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .35);
+}
+.modal-titulo { margin: 0; font-size: 20px; }
+.modal-card .secundario { margin: 0; }
+.modal-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.modal-item {
+  display: grid; gap: 2px; padding: 10px 12px 10px 16px; border-radius: 8px; border: 1px solid var(--borda);
+  box-shadow: inset 4px 0 0 var(--cor); background: color-mix(in srgb, var(--cor) 7%, var(--bg-elev));
+}
+.modal-tipo { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--cor); }
+.modal-item .fraco { font-size: 12px; }
+#btn-confirmar-avisos { padding: 14px; font-size: 16px; }
+
 /* ---------- CELULAR ---------- */
 @media (max-width: 760px) {
   .topo { padding: 10px 16px; gap: 10px; }
@@ -307,7 +353,9 @@ button.kpi:hover { border-color: var(--texto-3); }
   .acoes-topo { margin-left: auto; }
   .usuario-atual { display: none; }
   .avisos, .kpis, .filtros, .tabela-wrap, .rodape { padding-left: 16px; padding-right: 16px; }
-  .extracao { margin-left: 16px; margin-right: 16px; }
+  .extracao, .faixa-push { margin-left: 16px; margin-right: 16px; }
+  .eq-lista { padding-left: 16px; padding-right: 16px; grid-template-columns: 1fr; }
+  .pagina-equipe .kpis { grid-template-columns: repeat(2, 1fr); }
   .extracao-item { padding: 8px 12px; }
   .extracao-valor { font-size: 16px; }
   .extracao { grid-template-columns: repeat(2, minmax(0, 1fr)); }
