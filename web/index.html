@@ -109,6 +109,7 @@
       <button role="tab" data-aba="programaveis" class="aba">Programáveis <span class="contador" id="cont-programaveis">0</span></button>
       <button role="tab" data-aba="finalizadas" class="aba" title="Finalizadas hoje">Finalizadas <span class="contador" id="cont-finalizadas">0</span></button>
       <button role="tab" data-aba="equipes" class="aba">Por equipe <span class="contador" id="cont-equipes">0</span></button>
+      <button role="tab" data-aba="avisos" class="aba" id="aba-avisos" title="Avisos às equipes e confirmações" hidden>Avisos <span class="contador" id="cont-avisos">0</span></button>
       <button role="tab" data-aba="acessos" class="aba" id="aba-acessos" hidden>Acessos <span class="contador" id="cont-acessos">0</span></button>
     </nav>
 
@@ -129,6 +130,12 @@
       <div class="chips" id="filtro-periodo" role="group" aria-label="Período das finalizadas" hidden>
         <button data-periodo="hoje" class="chip">Hoje</button>
         <button data-periodo="" class="chip">Últimos 7 dias</button>
+      </div>
+      <div class="chips" id="filtro-status-aviso" role="group" aria-label="Status dos avisos" hidden>
+        <button data-status="" class="chip">Todos</button>
+        <button data-status="pendente" class="chip chip-vencida">Pendentes</button>
+        <button data-status="confirmado" class="chip">Confirmados</button>
+        <button data-status="dispensado" class="chip">Dispensados</button>
       </div>
       <button id="btn-exportar" class="btn-texto btn-exportar" title="Baixar relatório (Excel) das ordens exibidas">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>

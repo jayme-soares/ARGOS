@@ -140,6 +140,10 @@ button { cursor: pointer; }
 .tag.aprovado { color: var(--ok); background: var(--ok-bg); }
 .tag.recusado { color: var(--vencida); background: var(--vencida-bg); }
 .tag.admin { color: var(--marca); border: 1px solid var(--marca); }
+.tag.equipe { color: var(--atencao); border: 1px solid var(--atencao); }
+.tag.confirmado { color: var(--ok); background: var(--ok-bg); }
+.tag.dispensado { color: var(--sem); background: var(--bg-sunk); }
+.btn-mini.destaque { color: var(--alerta); border-color: var(--alerta); font-weight: 600; }
 
 /* ---------- TOPO ---------- */
 .topo {

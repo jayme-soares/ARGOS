@@ -29,8 +29,12 @@ Object.assign(estado, {
     finalizadas: { col: "finalizada", dir: -1 },
     equipes: { col: "vencidas", dir: -1 },
     acessos: { col: "status", dir: 1 },
+    avisos: { col: "enviado", dir: -1 },
   },
+  statusAviso: "",   // aba Avisos: "", "pendente", "confirmado" ou "dispensado"
   acessos: [],       // todas as linhas (só admins)
+  equipesResumo: [], // contas das equipes: última visualização, push, pendências
+  avisosEquipe: [],  // avisos às equipes dos últimos 7 dias
 });
 const ehAdmin = () => estado.acesso?.papel === "admin" && estado.acesso?.status === "aprovado";
 
@@ -38,7 +42,8 @@ function salvarPrefs() {
   gravarStorage(localStorage, CHAVE_PREFS, JSON.stringify({ aba: estado.aba, tema: document.documentElement.dataset.theme || null }));
 }
 
-const ABAS_COM_EQUIPE = new Set(["campo", "finalizadas"]);
+const ABAS_COM_EQUIPE = new Set(["campo", "finalizadas", "avisos"]);
+const normEquipe = (e) => String(e || "").replace(/\s+/g, "").toUpperCase();
 
 // ------------------------------------------------------------------
 // API
@@ -58,7 +63,7 @@ async function buscarSnapshot() {
     estado.snapshot = corpo;
     estado.ultimoErro = null;
     if (!estado.pushSincronizado) { estado.pushSincronizado = true; sincronizarPush(); }
-    if (ehAdmin()) await carregarAcessos();
+    await Promise.all([carregarDadosEquipes(), ehAdmin() ? carregarAcessos() : null]);
     return true;
   } catch (e) {
     estado.ultimoErro = e.message || String(e);
@@ -75,6 +80,35 @@ async function carregarAcessos() {
     .select("*")
     .order("solicitado_em", { ascending: false });
   if (!error) estado.acessos = data || [];
+}
+
+// Contas das equipes e avisos (supabase/migrations/003_argos_equipes.sql).
+// Sem a migração aplicada, as chamadas falham e o painel segue sem esses dados.
+async function carregarDadosEquipes() {
+  const desde = new Date(Date.now() - 7 * 86400000).toISOString();
+  const [resumo, avisos] = await Promise.all([
+    estado.sb.rpc("argos_equipes_resumo"),
+    estado.sb.from("argos_avisos_equipe").select("*").gte("criado_em", desde).order("criado_em", { ascending: false }).limit(3000),
+  ]);
+  if (!resumo.error) estado.equipesResumo = resumo.data || [];
+  if (!avisos.error) estado.avisosEquipe = avisos.data || [];
+}
+
+// Ações com a service role, pela API do Vercel (redefinir senha / excluir conta de equipe).
+async function acaoContaEquipe(acao, alvo, equipe) {
+  const token = await tokenAtual();
+  const r = await fetch("/api/admin-equipe", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ acao, alvo }),
+  });
+  const corpo = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(corpo.erro || `Erro ${r.status}`); return; }
+  if (acao === "redefinir_senha") {
+    prompt(`Senha temporária da equipe ${equipe}. Copie e repasse à equipe; ela vai criar uma senha nova no próximo login:`, corpo.senha);
+  }
+  await Promise.all([carregarAcessos(), carregarDadosEquipes()]);
+  renderizar();
 }
 
 async function acaoAcesso(funcao, params) {
@@ -310,8 +344,24 @@ function renderKpis(snap, campo, programaveis, finalizadas, agora) {
       cor: finHoje.length ? "ok" : null,
       acao: "finalizadas:",
     }),
+    kpiAvisos(agora),
     kpi({ rotulo: "Programáveis", valor: totalProg, detalhe: novasProg ? `${novasProg} nova(s) em 1h` : "aguardando designação", cor: totalProg ? "atencao" : null, acao: "programaveis:" }),
   ].join("");
+}
+
+// Avisos às equipes ainda sem confirmação (só aparece com contas de equipe).
+function kpiAvisos(agora) {
+  if (!estado.equipesResumo.length && !estado.avisosEquipe.length) return "";
+  const pendentes = estado.avisosEquipe.filter((a) => a.status === "pendente");
+  const equipes = new Set(pendentes.map((a) => a.equipe)).size;
+  const maisAntigo = pendentes.reduce((m, a) => (!m || a.criado_em < m ? a.criado_em : m), null);
+  return kpi({
+    rotulo: "Avisos pendentes",
+    valor: pendentes.length,
+    detalhe: pendentes.length ? `${equipes} equipe(s) · ${haQuanto(data(maisAntigo), agora)}` : "equipes confirmaram tudo",
+    cor: pendentes.length ? "vencida" : "ok",
+    acao: "avisos:",
+  });
 }
 
 function renderAbas(campo, programaveis, finalizadas, agora) {
@@ -321,6 +371,12 @@ function renderAbas(campo, programaveis, finalizadas, agora) {
   $("#cont-finalizadas").textContent = finHoje.length;
   $("#cont-equipes").textContent = new Set([...campo, ...finHoje].map((r) => r.equipe || "")).size;
   $("#aba-acessos").hidden = !ehAdmin();
+  const temEquipes = estado.equipesResumo.length > 0 || estado.avisosEquipe.length > 0;
+  $("#aba-avisos").hidden = !temEquipes;
+  if (estado.aba === "avisos" && !temEquipes) estado.aba = "campo";
+  const avisosPendentes = estado.avisosEquipe.filter((a) => a.status === "pendente").length;
+  $("#cont-avisos").textContent = avisosPendentes;
+  $("#cont-avisos").style.color = avisosPendentes ? "var(--vencida)" : "";
   const pendentes = estado.acessos.filter((a) => a.status === "pendente").length;
   $("#cont-acessos").textContent = pendentes;
   $("#cont-acessos").style.color = pendentes ? "var(--alerta)" : "";
@@ -340,15 +396,18 @@ function renderFiltros(campo, finalizadas) {
   const comEquipe = ABAS_COM_EQUIPE.has(estado.aba);
   const ehFinalizadas = estado.aba === "finalizadas";
   $("#filtro-equipe").hidden = !comEquipe;
-  $("#filtro-bairro").hidden = !comEquipe;
-  $("#filtro-urgencia").hidden = ehFinalizadas;
+  const ehAvisos = estado.aba === "avisos";
+  $("#filtro-bairro").hidden = !comEquipe || ehAvisos;
+  $("#filtro-urgencia").hidden = ehFinalizadas || ehAvisos;
   $("#filtro-periodo").hidden = !ehFinalizadas;
-  const base = ehFinalizadas ? finalizadas : campo;
+  $("#filtro-status-aviso").hidden = !ehAvisos;
+  const base = ehAvisos ? estado.avisosEquipe : ehFinalizadas ? finalizadas : campo;
   const unicos = (campo_) => [...new Set(base.map((r) => r[campo_] || ""))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   preencherSelect($("#filtro-equipe"), unicos("equipe"), estado.equipe, "Todas as equipes");
   preencherSelect($("#filtro-bairro"), unicos("bairro"), estado.bairro, "Todos os bairros");
   for (const c of $$("#filtro-urgencia .chip")) c.setAttribute("aria-pressed", String(c.dataset.urg === estado.urg));
   for (const c of $$("#filtro-periodo .chip")) c.setAttribute("aria-pressed", String(c.dataset.periodo === estado.periodo));
+  for (const c of $$("#filtro-status-aviso .chip")) c.setAttribute("aria-pressed", String(c.dataset.status === estado.statusAviso));
 }
 
 // ---------- colunas ----------
@@ -397,6 +456,9 @@ const COLUNAS = {
     { id: "finalizadas", rotulo: "Finalizadas hoje", valor: (r) => r.finalizadas, html: (r) => `<span class="num" style="color:${r.finalizadas ? "var(--ok)" : "var(--texto-3)"}">${r.finalizadas}</span>` },
     { id: "ate60", rotulo: "Vencem ≤ 1h", valor: (r) => r.ate60, html: (r) => `<span class="num" style="color:${r.ate60 ? "var(--alerta)" : "var(--texto-3)"}">${r.ate60}</span>` },
     { id: "restante", rotulo: "Próximo vencimento", valor: (r) => r._min, html: (r) => r._min == null ? `<span class="fraco">—</span>` : celRestante(r) },
+    { id: "visto", rotulo: "Última visualização", valor: (r) => r.conta?.ultimo_acesso_em, html: (r, agora) => celVisto(r.conta, agora) },
+    { id: "pendentes", rotulo: "Avisos pendentes", valor: (r) => r.conta ? r.conta.pendentes : null, html: (r, agora) => celPendentes(r.conta, agora) },
+    { id: "aparelhos", rotulo: "Push", valor: (r) => r.conta ? r.conta.aparelhos : null, html: (r) => celAparelhos(r.conta) },
     { id: "distribuicao", rotulo: "Distribuição", valor: null, html: (r) => {
       const seg = ["vencida", "critico", "alerta", "atencao", "ok", "sem"]
         .filter((u) => r.dist[u])
@@ -407,10 +469,70 @@ const COLUNAS = {
   ],
 };
 
+// Conta da equipe no painel /equipe (argos_equipes_resumo).
+function celVisto(conta, agora) {
+  if (!conta) return `<span class="fraco">sem acesso</span>`;
+  if (conta.status !== "aprovado") return `<span class="tag ${esc(conta.status)}">${esc(conta.status)}</span>`;
+  const d = data(conta.ultimo_acesso_em);
+  return d ? `<span class="num">${esc(diaHora(d))}</span><div class="secundario">${esc(haQuanto(d, agora))}</div>` : `<span class="fraco">nunca abriu</span>`;
+}
+function celPendentes(conta, agora) {
+  if (!conta) return `<span class="fraco">—</span>`;
+  if (!conta.pendentes) return `<span class="num" style="color:var(--texto-3)">0</span>`;
+  return `<span class="num" style="color:var(--vencida);font-weight:600">${conta.pendentes}</span><div class="secundario">desde ${esc(haQuanto(data(conta.pendente_desde), agora).replace(/^há /, ""))}</div>`;
+}
+function celAparelhos(conta) {
+  if (!conta) return `<span class="fraco">—</span>`;
+  return conta.aparelhos
+    ? `<span class="num">${conta.aparelhos}</span>`
+    : `<span class="num" style="color:var(--alerta)" title="Nenhum celular da equipe ativou as notificações">0</span>`;
+}
+
+const NOME_TIPO_AVISO = { designada: "Designada", vencer: "Vai vencer", vencida: "Vencida" };
+function textoTipoAviso(a) {
+  if (a.tipo === "vencer") {
+    const m = /^(\d+)min$/.exec(a.nivel || "");
+    return m ? `Vence em ≤ ${duracao(Number(m[1]))}` : NOME_TIPO_AVISO.vencer;
+  }
+  return NOME_TIPO_AVISO[a.tipo] || a.tipo;
+}
+function textoTempoConfirmacao(a, agora) {
+  const criado = data(a.criado_em);
+  if (a.status === "confirmado") return duracao((data(a.confirmado_em) - criado) / 60000);
+  if (a.status === "pendente") return `há ${duracao((agora - criado) / 60000)}`;
+  return "—";
+}
+const ORDEM_STATUS_AVISO = { pendente: 0, confirmado: 1, dispensado: 2 };
+COLUNAS.avisos = [
+  { id: "enviado", rotulo: "Enviado em", valor: (a) => a.criado_em, html: (a) => `<span class="num">${esc(diaHora(data(a.criado_em)))}</span>` },
+  { id: "equipe", rotulo: "Equipe", valor: (a) => a.equipe, html: (a) => esc(a.equipe) },
+  { id: "tipo", rotulo: "Tipo", valor: (a) => textoTipoAviso(a), html: (a) => esc(textoTipoAviso(a)) },
+  { id: "tdc", rotulo: "TdC", valor: (a) => a.tdc, html: (a) => `<span class="num">${esc(a.tdc)}</span>${a.ordem ? `<div class="secundario num">${esc(a.ordem)}</div>` : ""}` },
+  { id: "status", rotulo: "Status", valor: (a) => ORDEM_STATUS_AVISO[a.status], html: (a) => `<span class="tag ${esc(a.status)}">${esc(a.status)}</span>` },
+  { id: "confirmado", rotulo: "Confirmado em", valor: (a) => a.confirmado_em, html: (a) => a.confirmado_em ? `<span class="num">${esc(diaHora(data(a.confirmado_em)))}</span>` : `<span class="fraco">—</span>` },
+  { id: "tempo", rotulo: "Tempo até confirmar", valor: (a) => (a.status === "confirmado" ? data(a.confirmado_em) - data(a.criado_em) : null), html: (a, agora) => `<span class="badge">${esc(textoTempoConfirmacao(a, agora))}</span>` },
+  { id: "reenvios", rotulo: "Reenvios", valor: (a) => a.reenvios, html: (a) => `<span class="num">${a.reenvios || 0}</span>` },
+  { id: "aviso", rotulo: "Aviso", valor: (a) => a.titulo, html: (a) => `${esc(a.titulo)}${a.mensagem ? `<div class="secundario">${esc(a.mensagem)}</div>` : ""}`, cheio: true },
+];
+// Pendente há mais de 15 min fica vermelho; confirmado, verde.
+function urgAviso(a, agora) {
+  if (a.status === "confirmado") return "ok";
+  if (a.status === "dispensado") return "sem";
+  return agora - data(a.criado_em) > 15 * 60000 ? "vencida" : "alerta";
+}
+
 const ORDEM_STATUS = { pendente: 0, aprovado: 1, recusado: 2 };
 COLUNAS.acessos = [
-  { id: "nome", rotulo: "Usuário", valor: (a) => a.nome || a.email, html: (a) =>
-    `${esc(a.nome || a.email)}${a.papel === "admin" ? ` <span class="tag admin">admin</span>` : ""}${a.nome ? `<div class="secundario">${esc(a.email)}</div>` : ""}` },
+  { id: "nome", rotulo: "Usuário", valor: (a) => a.equipe || a.nome || a.email, html: (a, agora) => {
+    if (a.papel === "equipe") {
+      const conta = estado.equipesResumo.find((c) => c.user_id === a.user_id);
+      const reset = a.reset_solicitado_em
+        ? `<div class="secundario" style="color:var(--alerta)">pediu reset de senha ${esc(haQuanto(data(a.reset_solicitado_em), agora))}</div>` : "";
+      const push = conta ? `<div class="secundario">push em ${conta.aparelhos} aparelho(s)</div>` : "";
+      return `${esc(a.equipe)} <span class="tag equipe">equipe</span>${reset}${push}`;
+    }
+    return `${esc(a.nome || a.email)}${a.papel === "admin" ? ` <span class="tag admin">admin</span>` : ""}${a.nome ? `<div class="secundario">${esc(a.email)}</div>` : ""}`;
+  } },
   { id: "status", rotulo: "Status", valor: (a) => ORDEM_STATUS[a.status], html: (a) => `<span class="tag ${esc(a.status)}">${esc(a.status)}</span>` },
   { id: "solicitado", rotulo: "Pediu acesso", valor: (a) => a.solicitado_em, html: (a, agora) => `<span class="secundario">${esc(haQuanto(data(a.solicitado_em), agora))}</span>` },
   { id: "ultimo", rotulo: "Último acesso", valor: (a) => a.ultimo_acesso_em, html: (a, agora) => `<span class="secundario">${esc(a.ultimo_acesso_em ? haQuanto(data(a.ultimo_acesso_em), agora) : "nunca")}</span>` },
@@ -421,6 +543,12 @@ COLUNAS.acessos = [
     if (a.status !== "aprovado") b.push(`<button class="btn-mini aprovar" data-fn="argos_definir_status" data-alvo="${id}" data-valor="aprovado">Aprovar</button>`);
     if (a.status === "pendente") b.push(`<button class="btn-mini recusar" data-fn="argos_definir_status" data-alvo="${id}" data-valor="recusado">Recusar</button>`);
     if (a.status === "aprovado" && !eu) b.push(`<button class="btn-mini recusar" data-fn="argos_definir_status" data-alvo="${id}" data-valor="recusado" data-confirmar="Revogar o acesso de ${esc(a.email)}?">Revogar</button>`);
+    if (a.papel === "equipe") {
+      const eq = esc(a.equipe);
+      b.push(`<button class="btn-mini${a.reset_solicitado_em ? " destaque" : ""}" data-conta-equipe="redefinir_senha" data-alvo="${id}" data-nome="${eq}" data-confirmar="Gerar uma senha temporária para a equipe ${eq}? A senha atual deixa de funcionar.">Redefinir senha</button>`);
+      b.push(`<button class="btn-mini recusar" data-conta-equipe="excluir" data-alvo="${id}" data-nome="${eq}" data-confirmar="Excluir a conta da equipe ${eq}? O código fica livre para um novo cadastro.">Excluir conta</button>`);
+      return `<div class="acoes-linha">${b.join("")}</div>`;
+    }
     if (a.status === "aprovado" && a.papel !== "admin") b.push(`<button class="btn-mini" data-fn="argos_definir_papel" data-alvo="${id}" data-valor="admin" data-confirmar="Tornar ${esc(a.email)} administrador?">Tornar admin</button>`);
     if (a.papel === "admin") b.push(`<button class="btn-mini" data-fn="argos_definir_papel" data-alvo="${id}" data-valor="usuario" data-confirmar="${eu ? "Deixar de ser administrador? Você perde o acesso a esta aba." : `Remover ${esc(a.email)} dos administradores?`}">Remover admin</button>`);
     return `<div class="acoes-linha">${b.join("")}</div>`;
@@ -434,6 +562,7 @@ function agruparPorEquipe(campo, finalizadasHoje = []) {
     return grupos.get(k);
   };
   for (const r of finalizadasHoje) grupo(r.equipe || "").finalizadas++;
+  for (const c of estado.equipesResumo) if (c.pendentes) grupo(c.equipe);
   for (const r of campo) {
     const g = grupo(r.equipe || "");
     g.total++;
@@ -443,7 +572,10 @@ function agruparPorEquipe(campo, finalizadasHoje = []) {
     if (r._min != null && r._min > 0 && (g._min == null || r._min < g._min)) g._min = r._min;
   }
   // Equipe com vencida em aberto fica vermelha mesmo que a próxima ainda esteja no prazo.
-  return [...grupos.values()].map((g) => ({ ...g, _urg: g.vencidas ? "vencida" : classificar(g._min) }));
+  const contas = new Map(estado.equipesResumo.map((c) => [normEquipe(c.equipe), c]));
+  return [...grupos.values()].map((g) => ({
+    ...g, conta: contas.get(normEquipe(g.equipe)) || null, _urg: g.vencidas ? "vencida" : classificar(g._min),
+  }));
 }
 
 function filtrar(linhas, aba = estado.aba) {
@@ -452,13 +584,15 @@ function filtrar(linhas, aba = estado.aba) {
   return linhas.filter((r) => {
     if (ABAS_COM_EQUIPE.has(aba)) {
       if (estado.equipe && (r.equipe || "") !== estado.equipe) return false;
-      if (estado.bairro && (r.bairro || "") !== estado.bairro) return false;
+      if (aba !== "avisos" && estado.bairro && (r.bairro || "") !== estado.bairro) return false;
     }
-    if (aba === "finalizadas") {
+    if (aba === "avisos") {
+      if (estado.statusAviso && r.status !== estado.statusAviso) return false;
+    } else if (aba === "finalizadas") {
       if (estado.periodo === "hoje" && !finalizadaHoje(r, agora)) return false;
     } else if (estado.urg && !FILTRO_URGENCIA[estado.urg](r._min)) return false;
     if (termo) {
-      const alvo = [r.ordem, r.tdc, r.cliente, r.equipe, r.bairro, r.tipo, r.endereco, r.nome_cliente, r.resultado].join(" ").toLowerCase();
+      const alvo = [r.ordem, r.tdc, r.cliente, r.equipe, r.bairro, r.tipo, r.endereco, r.nome_cliente, r.resultado, r.titulo].join(" ").toLowerCase();
       if (!alvo.includes(termo)) return false;
     }
     return true;
@@ -485,7 +619,10 @@ function linhasDaAba(campo, programaveis, finalizadas, aba = estado.aba) {
   if (aba === "campo") linhas = filtrar(campo, aba);
   else if (aba === "programaveis") linhas = filtrar(programaveis, aba);
   else if (aba === "finalizadas") linhas = filtrar(finalizadas, aba);
-  else if (aba === "acessos") linhas = estado.acessos.map((a) => ({ ...a, _urg: a.status === "pendente" ? "alerta" : a.status === "recusado" ? "sem" : "ok" }));
+  else if (aba === "avisos") {
+    const agora = new Date();
+    linhas = filtrar(estado.avisosEquipe.map((a) => ({ ...a, _urg: urgAviso(a, agora) })), aba);
+  } else if (aba === "acessos") linhas = estado.acessos.map((a) => ({ ...a, _urg: a.status === "pendente" ? "alerta" : a.status === "recusado" ? "sem" : "ok" }));
   else {
     const agora = new Date();
     linhas = agruparPorEquipe(campo, finalizadas.filter((r) => finalizadaHoje(r, agora)));
@@ -525,6 +662,8 @@ function renderTabela(campo, programaveis, finalizadas, agora) {
     }[estado.aba] || "Nenhuma religação em campo no relatório.";
     vazio.textContent = estado.aba === "acessos"
       ? "Nenhum pedido de acesso."
+      : estado.aba === "avisos"
+      ? (estado.avisosEquipe.length ? "Nenhum aviso com esses filtros." : "Nenhum aviso às equipes nos últimos 7 dias.")
       : !estado.snapshot
       ? "Carregando…"
       : temDados ? "Nenhuma ordem com esses filtros." : semDados;
@@ -612,6 +751,19 @@ const COLUNAS_RELATORIO = {
     ["Resultado", (r) => r.resultado],
     ["Causa", (r) => r.causa],
   ],
+  avisos: [
+    ["Equipe", (a) => a.equipe],
+    ["Tipo", (a) => textoTipoAviso(a)],
+    ["TdC", (a) => a.tdc],
+    ["Ordem", (a) => a.ordem],
+    ["Aviso", (a) => a.titulo],
+    ["Detalhe", (a) => a.mensagem],
+    ["Enviado em", (a) => dataBrasilia(data(a.criado_em)), "data"],
+    ["Status", (a) => a.status, "urgencia"],
+    ["Confirmado em", (a) => dataBrasilia(data(a.confirmado_em)), "data"],
+    ["Tempo até confirmar", (a) => (a.status === "confirmado" ? textoTempoConfirmacao(a, new Date()) : "")],
+    ["Reenvios", (a) => a.reenvios || 0],
+  ],
 };
 
 let exceljs = null;
@@ -628,9 +780,10 @@ function descreverFiltros(aba) {
   const f = [];
   if (estado.texto.trim()) f.push(`busca "${estado.texto.trim()}"`);
   if (aba === "finalizadas") f.push(estado.periodo === "hoje" ? "finalizadas hoje" : "período da extração");
+  else if (aba === "avisos") { if (estado.statusAviso) f.push(`status ${estado.statusAviso}`); }
   else if (estado.urg) f.push($(`#filtro-urgencia [data-urg="${estado.urg}"]`)?.textContent || estado.urg);
   if (ABAS_COM_EQUIPE.has(aba) && estado.equipe) f.push(`equipe ${estado.equipe}`);
-  if (ABAS_COM_EQUIPE.has(aba) && estado.bairro) f.push(`bairro ${estado.bairro}`);
+  if (ABAS_COM_EQUIPE.has(aba) && aba !== "avisos" && estado.bairro) f.push(`bairro ${estado.bairro}`);
   return f.length ? `Filtros: ${f.join(", ")}` : "Sem filtros";
 }
 
@@ -718,6 +871,7 @@ async function exportarRelatorio() {
       ["programaveis", "Programáveis", "Religas programáveis"],
       ["finalizadas", "Finalizadas", "Religas finalizadas"],
     ];
+    if (estado.avisosEquipe.length) abas.push(["avisos", "Avisos", "Avisos às equipes (últimos 7 dias)"]);
     for (const [aba, nome, titulo] of abas) {
       const linhas = linhasDaAba(campo, programaveis, finalizadas, aba);
       const resumo = `Gerado em ${geradoEm} · ${linhas.length} ${linhas.length === 1 ? "ordem" : "ordens"} · ${descreverFiltros(aba)}`;
@@ -754,6 +908,7 @@ $("#kpis").addEventListener("click", (ev) => {
   const [aba, urg] = alvo.dataset.acao.split(":");
   estado.urg = urg || "";
   if (aba === "finalizadas") estado.periodo = "hoje";
+  if (aba === "avisos") estado.statusAviso = "pendente";
   estado.equipe = "";
   estado.bairro = "";
   trocarAba(aba);
@@ -764,11 +919,18 @@ $("#tabela-cabecalho").addEventListener("click", (ev) => {
   if (!th) return;
   const o = estado.ordem[estado.aba];
   if (o.col === th.dataset.col) o.dir *= -1;
-  else { o.col = th.dataset.col; o.dir = ["vencidas", "total", "ate60", "finalizadas", "finalizada"].includes(th.dataset.col) ? -1 : 1; }
+  else { o.col = th.dataset.col; o.dir = ["vencidas", "total", "ate60", "finalizadas", "finalizada", "visto", "pendentes", "enviado", "reenvios"].includes(th.dataset.col) ? -1 : 1; }
   renderizar();
 });
 
 $("#tabela-corpo").addEventListener("click", async (ev) => {
+  const conta = ev.target.closest("[data-conta-equipe]");
+  if (conta) {
+    if (conta.dataset.confirmar && !confirm(conta.dataset.confirmar)) return;
+    conta.disabled = true;
+    await acaoContaEquipe(conta.dataset.contaEquipe, conta.dataset.alvo, conta.dataset.nome);
+    return;
+  }
   const acao = ev.target.closest("[data-fn]");
   if (acao) {
     if (acao.dataset.confirmar && !confirm(acao.dataset.confirmar)) return;
@@ -791,6 +953,13 @@ $("#filtro-urgencia").addEventListener("click", (ev) => {
   const c = ev.target.closest(".chip");
   if (!c) return;
   estado.urg = estado.urg === c.dataset.urg ? "" : c.dataset.urg;
+  renderizar();
+});
+
+$("#filtro-status-aviso").addEventListener("click", (ev) => {
+  const c = ev.target.closest(".chip");
+  if (!c) return;
+  estado.statusAviso = c.dataset.status;
   renderizar();
 });
 
