@@ -352,7 +352,7 @@ function renderizar() {
   const finalizadas = enriquecerFinalizadas(snap?.campo?.finalizadas);
 
   renderStatus(snap, agora);
-  renderExtracao(snap, agora);
+  renderExtracao(snap, campo, agora);
   renderAvisos(snap, agora);
   renderKpis(snap, campo, programaveis, finalizadas, agora);
   renderAbas(campo, programaveis, finalizadas, agora);
@@ -385,7 +385,7 @@ function renderStatus(snap, agora) {
   $("#status").innerHTML = pills.join("");
 }
 
-function renderExtracao(snap, agora) {
+function renderExtracao(snap, campo, agora) {
   const el = $("#extracao");
   if (!snap) { el.hidden = true; return; }
   el.hidden = false;
@@ -418,6 +418,24 @@ function renderExtracao(snap, agora) {
       <span class="extracao-rotulo">Próxima extração</span>
       <span class="extracao-valor num">${esc(proximaTxt)}</span>
       <span class="extracao-detalhe">${esc(proximaDet)}</span>
+    </div>
+    ${itemProximoVencimento(campo, agora)}`;
+}
+
+// Contagem regressiva da próxima ordem em campo ainda no prazo, na cor da
+// urgência dela. atualizarContadores() anda o relógio a cada segundo.
+function itemProximoVencimento(campo, agora) {
+  const proxima = campo.filter((r) => r._min > 0).sort((a, b) => a._min - b._min)[0];
+  const cor = proxima ? `style="--cor: var(--${proxima._urg})"` : "";
+  const valor = proxima ? `<span data-contagem-ate="${proxima._venc.getTime()}">${cronometro(proxima._venc - agora)}</span>` : "—";
+  const detalhe = proxima
+    ? `vence ${diaHora(proxima._venc)} · TdC ${proxima.tdc} · ${proxima.equipe || "sem equipe"}`
+    : "nenhuma ordem no prazo";
+  return `
+    <div class="extracao-item extracao-vencimento" ${cor}>
+      <span class="extracao-rotulo">Próximo vencimento em</span>
+      <span class="extracao-valor num">${valor}</span>
+      <span class="extracao-detalhe" title="${esc(detalhe)}">${esc(detalhe)}</span>
     </div>`;
 }
 
@@ -447,14 +465,14 @@ function renderAvisos(snap, agora) {
   $("#avisos").innerHTML = avisos.map((a) => `<div class="aviso${a.erro ? " erro" : ""}">${esc(a.txt)}</div>`).join("");
 }
 
-function kpi({ rotulo, valor, detalhe = "", cor = null, acao = null, destaque = false, contagemAte = null }) {
+function kpi({ rotulo, valor, detalhe = "", cor = null, acao = null }) {
   const tag = acao ? "button" : "div";
   const estilo = cor ? `style="--cor: var(--${cor}); --cor-valor: var(--${cor})"` : "";
   const zero = valor === 0 ? " zero" : "";
   const dataAcao = acao ? `data-acao="${esc(acao)}"` : "";
-  return `<${tag} class="kpi${destaque ? " destaque" : ""}${zero}" ${estilo} ${dataAcao}>
+  return `<${tag} class="kpi${zero}" ${estilo} ${dataAcao}>
     <div class="rotulo">${esc(rotulo)}</div>
-    <div class="valor"${contagemAte ? ` data-contagem-ate="${contagemAte.getTime()}"` : ""}>${esc(valor)}</div>
+    <div class="valor">${esc(valor)}</div>
     <div class="detalhe">${detalhe}</div>
   </${tag}>`;
 }
@@ -469,7 +487,6 @@ function renderKpis(snap, campo, programaveis, finalizadas, agora) {
     const d = data(r.primeiro_visto_em);
     return d && agora - d <= 60 * 60000;
   }).length;
-  const proxima = campo.filter((r) => r._min > 0).sort((a, b) => a._min - b._min)[0];
   const totalProg = snap?.programaveis?.total ?? programaveis.length;
   const finHoje = finalizadas.filter((r) => finalizadaHoje(r, agora));
   const finNoPrazo = finHoje.filter((r) => r.no_prazo === true).length;
@@ -489,14 +506,6 @@ function renderKpis(snap, campo, programaveis, finalizadas, agora) {
       acao: "finalizadas:",
     }),
     kpi({ rotulo: "Programáveis", valor: totalProg, detalhe: novasProg ? `${novasProg} nova(s) em 1h` : "aguardando designação", cor: totalProg ? "atencao" : null, acao: "programaveis:" }),
-    kpi({
-      rotulo: "Próximo vencimento em",
-      valor: proxima ? cronometro(proxima._venc - agora) : "—",
-      contagemAte: proxima?._venc,
-      detalhe: proxima ? `vence ${esc(diaHora(proxima._venc))} · TdC ${esc(proxima.tdc)} · ${esc(proxima.equipe || "sem equipe")}` : "nenhuma ordem no prazo",
-      cor: proxima ? proxima._urg : null,
-      destaque: true,
-    }),
   ].join("");
 }
 

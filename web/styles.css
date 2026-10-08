@@ -179,14 +179,16 @@ button { cursor: pointer; }
 
 /* ---------- EXTRAÇÃO ---------- */
 .extracao {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 12px 24px 0;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 12px 24px 0;
   background: var(--bg-elev); border: 1px solid var(--borda); border-radius: var(--raio); box-shadow: var(--sombra);
 }
 .extracao-item { display: grid; gap: 1px; padding: 10px 16px; min-width: 0; }
 .extracao-item + .extracao-item { border-left: 1px solid var(--borda); }
 .extracao-rotulo { color: var(--texto-2); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
 .extracao-valor { font-size: 20px; font-weight: 600; color: var(--texto); }
-.extracao-detalhe { color: var(--texto-3); font-size: 12px; min-height: 1.2em; }
+.extracao-detalhe { color: var(--texto-3); font-size: 12px; min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.extracao-vencimento { box-shadow: inset 3px 0 0 var(--cor, transparent); }
+.extracao-vencimento .extracao-valor { color: var(--cor, var(--texto)); }
 
 /* ---------- AVISOS ---------- */
 .avisos { padding: 0 24px; display: grid; gap: 8px; margin-top: 12px; }
@@ -210,7 +212,6 @@ button.kpi:hover { border-color: var(--texto-3); }
 .kpi .rotulo { color: var(--texto-2); font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; }
 .kpi .valor { font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1.15; margin-top: 4px; color: var(--cor-valor, var(--texto)); }
 .kpi .detalhe { color: var(--texto-3); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kpi.destaque { grid-column: span 2; }
 .kpi.zero .valor { color: var(--texto-3); }
 
 /* ---------- ABAS ---------- */
@@ -309,9 +310,10 @@ button.kpi:hover { border-color: var(--texto-3); }
   .extracao { margin-left: 16px; margin-right: 16px; }
   .extracao-item { padding: 8px 12px; }
   .extracao-valor { font-size: 16px; }
+  .extracao { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .extracao-vencimento { grid-column: 1 / -1; border-left: 0 !important; border-top: 1px solid var(--borda); }
   .abas { padding-left: 16px; padding-right: 16px; }
   .kpis { grid-template-columns: repeat(2, 1fr); gap: 8px; }
-  .kpi.destaque { grid-column: span 2; }
   .kpi .valor { font-size: 24px; }
   .filtros select { flex: 1 1 45%; max-width: none; }
   .btn-exportar { width: 100%; justify-content: center; }
