@@ -54,6 +54,12 @@ Cada push lista só o TdC e a data/hora do vencimento; os detalhes ficam no pain
 
 Cada ordem recebe cada aviso uma única vez.
 
+**Avisos às equipes de campo** (painel `/equipe`, ver [Painel das equipes](#painel-das-equipes-de-campo)):
+- religa designada para a equipe (nova na exportação ou redesignada de outra equipe);
+- religa perto de vencer (os mesmos níveis de `ARGOS_ALERTAS_MIN`) e religa vencida.
+
+Cada equipe recebe só as próprias ordens, e cada aviso precisa ser confirmado no painel. Sem confirmação, o push é reenviado a cada `ARGOS_REENVIO_AVISO_MIN`.
+
 **Janela de funcionamento:** seg-sex, das 7h às 20h. Fora desse horário o Chrome fica desligado.
 
 ## Estrutura
@@ -65,12 +71,13 @@ Cada ordem recebe cada aviso uma única vez.
 | `argos/eorder/` | Selenium: driver, login, Programáveis, Busca TdC/exportação |
 | `argos/planilha.py` | Leitura da planilha exportada. Detecta xlsx/xls/xlsb/HTML/XML pelo conteúdo |
 | `argos/alertas.py` | Regras dos pushes de vencimento |
+| `argos/avisos_equipe.py` | Avisos às equipes: designação, vencimento, reenvio dos não confirmados |
 | `argos/notificacao.py` / `argos/webpush.py` | Envio dos pushes: ntfy e Web Push do painel |
 | `argos/publicador.py` | Snapshot JSON: grava em `/data/snapshot.json` e publica no Upstash |
-| `web/` | Painel (Vercel). HTML/CSS/JS puro, sem build |
+| `web/` | Painel (Vercel). HTML/CSS/JS puro, sem build. `index.html` + `app.js` é o painel da gestão; `equipe.html` + `equipe.js` é o das equipes; `comum.js` é compartilhado |
 | `tests/` | Testes da planilha e dos alertas |
 
-O estado fica no volume `/data`: `programaveis.json`, `alertas.json` (em campo), `alertas_programaveis.json`, `snapshot.json`, `downloads/` e `debug/`, onde ficam os screenshots de erro. Por isso um restart do container não repete pushes.
+O estado fica no volume `/data`: `programaveis.json`, `alertas.json` (em campo), `alertas_programaveis.json`, `designacoes.json` (equipe de cada ordem na última exportação), `snapshot.json`, `downloads/` e `debug/`, onde ficam os screenshots de erro. Por isso um restart do container não repete pushes.
 
 ## Rodando localmente
 
@@ -129,6 +136,29 @@ Para configurar:
 3. Para o cadastro funcionar, em **Authentication → Sign In / Providers**, deixe ligado **Allow new users to sign up** (e o provedor Email).
 4. Se **Confirm email** estiver ligado, a pessoa recebe um link e só consegue entrar depois de confirmar. Nesse caso, em **Authentication → URL Configuration**, adicione o endereço do painel no Vercel em **Redirect URLs** (e, se quiser, como **Site URL**).
 
+## Painel das equipes de campo
+
+Cada equipe (código `NI2...`) tem um acesso próprio em `/equipe` (por exemplo, `https://seu-projeto.vercel.app/equipe`). A tela foi feita para o celular.
+
+- **Login:** código da equipe e senha. No primeiro acesso, a equipe toca em "Primeiro acesso? Cadastre a equipe", cria a senha e fica aguardando aprovação de um admin na aba **Acessos**. Um código tem uma conta só, que pode estar aberta em vários celulares ao mesmo tempo.
+- **O que a equipe vê:** só as religas designadas para ela. As em aberto aparecem com contagem regressiva, cor de urgência, endereço e link para o mapa. As finalizadas (hoje ou nos últimos 7 dias) aparecem com "no prazo" ou "fora do prazo". O filtro por equipe é feito no servidor (`/api/snapshot`), então uma equipe nunca recebe dados de outra.
+- **Notificações:** a equipe ativa o sino (ou a faixa "Ative as notificações") em cada celular. Recebe só os avisos das próprias ordens, e nunca os da gestão. A gestão também não recebe os das equipes.
+- **Confirmação obrigatória:** cada aviso fica pendente até a equipe tocar em "Confirmo que visualizei". Enquanto houver pendentes, o painel fica bloqueado por esse aviso e o push é reenviado a cada `ARGOS_REENVIO_AVISO_MIN`. Se a ordem sai da equipe (foi finalizada ou redesignada), o aviso é dispensado.
+- **Senha esquecida:** na tela de login, "Esqueci a senha" registra o pedido, que aparece em destaque na aba **Acessos**. O admin clica em "Redefinir senha" e repassa a senha temporária mostrada. A equipe é obrigada a criar uma senha nova no próximo login. "Excluir conta" libera o código para um novo cadastro.
+- **No painel da gestão:**
+  - O indicador **Avisos pendentes** e a aba **Avisos** mostram cada aviso com equipe, tipo, TdC, envio, status (pendente, confirmado ou dispensado), hora da confirmação, tempo até confirmar e reenvios. A aba também vai para o Excel.
+  - A aba **Por equipe** mostra a **última visualização** do painel por cada equipe (resolução de 1 min), os avisos pendentes e quantos celulares têm push ativo.
+
+Para configurar (uma vez):
+
+1. No SQL Editor do Supabase, rode [`supabase/migrations/003_argos_equipes.sql`](supabase/migrations/003_argos_equipes.sql), depois da 001 e da 002.
+2. No Vercel, adicione a variável `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API do Supabase → **service_role**). Ela fica só nas funções `/api/equipe-cadastro` e `/api/admin-equipe`, que criam as contas das equipes, trocam a senha e excluem a conta. Ela nunca vai para o navegador. Faça o redeploy.
+3. Opcional: `ARGOS_DOMINIO_EQUIPES` no Vercel (padrão `equipes.argos.local`). As contas das equipes usam um e-mail interno `<código>@<domínio>`, que a equipe não precisa saber. Não troque depois de criar contas.
+4. A VPS não precisa de variável nova. Basta atualizar o bot (`git pull` + `docker compose up -d --build`). Os avisos usam o mesmo Supabase e as mesmas chaves do Web Push.
+5. Teste: com uma equipe aprovada e o sino ativo no celular, rode na VPS `docker compose run --rm argos python -m argos.avisos_equipe --teste NI2XXXX`. O aviso de teste chega, bloqueia o painel da equipe até ela confirmar e aparece na aba **Avisos**.
+
+Na primeira exportação depois da atualização, o bot só registra a equipe de cada ordem. Os avisos de designação começam na exportação seguinte, para que todas as ordens já abertas não cheguem como "novas".
+
 ## Painel no Vercel
 
 1. Importe o repositório no Vercel e defina **Root Directory = `web`**. Framework: *Other*, sem build command.
@@ -136,7 +166,8 @@ Para configurar:
    - `UPSTASH_REDIS_REST_URL`
    - `UPSTASH_REDIS_REST_TOKEN`
    - `SUPABASE_URL`: em Project Settings → API
-   - `SUPABASE_ANON_KEY`: a chave **anon/public**. Nunca use a service_role aqui.
+   - `SUPABASE_ANON_KEY`: a chave **anon/public**.
+   - `SUPABASE_SERVICE_ROLE_KEY`: a chave **service_role**, só para as contas das equipes (ver acima). É usada apenas no servidor, nas funções `/api/*`.
 3. Faça o deploy. Coloque a URL gerada em `ARGOS_PAINEL_URL` no `.env` da VPS, para que tocar no push abra o painel.
 
 Para testar localmente: `cd web && npx vercel dev`, com as mesmas variáveis num `web/.env.local`.
@@ -174,11 +205,14 @@ Todas as opções estão comentadas em [`.env.example`](.env.example). As princi
 | `ARGOS_CAMPO_DIAS_ATRAS` | `7` | Data de lançamento: de N dias atrás até hoje |
 | `ARGOS_ID_DATA_LANC_INICIO` / `_FIM` | `698246` / `698247` | IDs dos campos de data. Ajuste se o eOrder mudar |
 | `ARGOS_ALERTAS_MIN` | `120,60,30,15` | Antecedências dos avisos de vencimento (em campo e programáveis) |
+| `ARGOS_AVISOS_EQUIPE` | `1` | Avisos às equipes de campo (painel `/equipe`) |
+| `ARGOS_REENVIO_AVISO_MIN` | `10` | Reenvio do push enquanto a equipe não confirma o aviso |
 | `ARGOS_MODO_SEQUENCIAL` | `0` | `1` se o eOrder não aceitar duas sessões simultâneas do mesmo usuário |
 
 ## Limitações conhecidas
 
 - Programáveis: só a primeira página da grade (~25 linhas) é lida. O total vem do título "Lista Atividades (N)", e o painel avisa quando há mais linhas do que as exibidas.
 - Finalizadas: só aparecem as ordens com data de lançamento dentro da janela da Busca TdC (`ARGOS_CAMPO_DIAS_ATRAS`) e são atualizadas a cada exportação (30 min). Canceladas não contam como finalizadas, a menos que o estado esteja em `ARGOS_ESTADOS_FINALIZADOS`.
+- Avisos às equipes: as designações são vistas a cada exportação (30 min), então o aviso de religa designada pode chegar até 30 min depois da designação no eOrder. As notificações dependem de cada celular ter ativado o sino. No iPhone, o ARGOS precisa estar instalado na Tela de Início.
 - `ARGOS_DIAS_UTEIS_PRAZO` está em 2, que é temporário. A regra real é 1.
 - Os seletores do menu de opções da Busca TdC e da lista de exportação são XPaths absolutos herdados do projeto Produção SOC e podem quebrar se o layout mudar. Quando algo falha, o screenshot vai para `/data/debug`.
