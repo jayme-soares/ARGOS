@@ -18,6 +18,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import pandas as pd
+from openpyxl import load_workbook
 
 # Os exports do eOrder vêm sem estilo padrão; o openpyxl avisa a cada leitura.
 warnings.filterwarnings("ignore", message="Workbook contains no default style")
@@ -65,13 +66,27 @@ FORMATOS_DATA = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H
 # DETECÇÃO DE FORMATO / LEITURA BRUTA
 # ------------------------------------------------------------------
 
+def _abas_usadas(conteudo: bytes) -> list[str] | None:
+    """Só as abas "TdC" e "Linhas TdC" de um xlsx. O export traz outras
+    (Medidores, Coordenadas...) bem maiores, e ler todas multiplicava o
+    tempo e a memória. None (ler todas) se a aba TdC não estiver lá."""
+    wb = load_workbook(io.BytesIO(conteudo), read_only=True)
+    try:
+        por_normalizado = {normalizar_texto(n): n for n in wb.sheetnames}
+    finally:
+        wb.close()
+    if normalizar_texto(ABA_PREFERIDA) not in por_normalizado:
+        return None
+    return [por_normalizado[normalizar_texto(n)] for n in (ABA_PREFERIDA, ABA_LINHAS) if normalizar_texto(n) in por_normalizado]
+
+
 def _ler_bruto(conteudo: bytes, nome: str) -> dict[str, pd.DataFrame]:
     """Retorna {nome_aba: DataFrame sem cabeçalho (header=None)}."""
     if conteudo[:4] == b"PK\x03\x04":
         with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
             nomes = z.namelist()
             if "xl/workbook.xml" in nomes:
-                return pd.read_excel(io.BytesIO(conteudo), sheet_name=None, header=None, engine="openpyxl")
+                return pd.read_excel(io.BytesIO(conteudo), sheet_name=_abas_usadas(conteudo), header=None, engine="openpyxl")
             if "xl/workbook.bin" in nomes:
                 return pd.read_excel(io.BytesIO(conteudo), sheet_name=None, header=None, engine="pyxlsb")
             # zip "comum" com a planilha dentro
