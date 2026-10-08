@@ -40,9 +40,11 @@ const estado = {
   equipe: "",
   bairro: "",
   urg: "",
+  periodo: "hoje",   // aba Finalizadas: "hoje" ou "" (toda a janela da extração)
   ordem: {
     campo: { col: "restante", dir: 1 },
     programaveis: { col: "restante", dir: 1 },
+    finalizadas: { col: "finalizada", dir: -1 },
     equipes: { col: "vencidas", dir: -1 },
     acessos: { col: "status", dir: 1 },
   },
@@ -142,6 +144,19 @@ function enriquecer(registros, agora) {
     return { ...r, _venc: venc, _min: min, _urg: classificar(min) };
   });
 }
+
+// Finalizadas: a cor da linha diz se fechou no prazo (verde) ou depois do
+// vencimento (vermelho). _folga = minutos entre a finalização e o prazo.
+function enriquecerFinalizadas(registros) {
+  return (registros || []).map((r) => {
+    const venc = data(r.vencimento);
+    const fim = data(r.finalizada_em);
+    const folga = venc && fim ? (venc - fim) / 60000 : null;
+    return { ...r, _venc: venc, _fim: fim, _min: null, _folga: folga, _urg: r.no_prazo === true ? "ok" : r.no_prazo === false ? "vencida" : "sem" };
+  });
+}
+const finalizadaHoje = (r, agora) => r._fim && mesmoDia(r._fim, agora);
+const ABAS_COM_EQUIPE = new Set(["campo", "finalizadas"]);
 
 // ------------------------------------------------------------------
 // API
@@ -334,15 +349,16 @@ function renderizar() {
   const snap = estado.snapshot;
   const campo = enriquecer(snap?.campo?.registros, agora);
   const programaveis = enriquecer(snap?.programaveis?.registros, agora);
+  const finalizadas = enriquecerFinalizadas(snap?.campo?.finalizadas);
 
   renderStatus(snap, agora);
   renderExtracao(snap, agora);
   renderAvisos(snap, agora);
-  renderKpis(snap, campo, programaveis, agora);
-  renderAbas(campo, programaveis);
-  renderFiltros(campo);
+  renderKpis(snap, campo, programaveis, finalizadas, agora);
+  renderAbas(campo, programaveis, finalizadas, agora);
+  renderFiltros(campo, finalizadas);
   if (estado.aba === "acessos" && !ehAdmin()) estado.aba = "campo";
-  renderTabela(campo, programaveis, agora);
+  renderTabela(campo, programaveis, finalizadas, agora);
   $("#usuario-atual").textContent = estado.acesso?.email || "";
 
   $("#rodape-info").textContent = snap?.gerado_em
@@ -443,7 +459,7 @@ function kpi({ rotulo, valor, detalhe = "", cor = null, acao = null, destaque = 
   </${tag}>`;
 }
 
-function renderKpis(snap, campo, programaveis, agora) {
+function renderKpis(snap, campo, programaveis, finalizadas, agora) {
   const conta = (f) => campo.filter((r) => f(r._min)).length;
   const vencidas = conta(FILTRO_URGENCIA.vencida);
   const ate30 = conta(FILTRO_URGENCIA.critico);
@@ -455,6 +471,9 @@ function renderKpis(snap, campo, programaveis, agora) {
   }).length;
   const proxima = campo.filter((r) => r._min > 0).sort((a, b) => a._min - b._min)[0];
   const totalProg = snap?.programaveis?.total ?? programaveis.length;
+  const finHoje = finalizadas.filter((r) => finalizadaHoje(r, agora));
+  const finNoPrazo = finHoje.filter((r) => r.no_prazo === true).length;
+  const finForaPrazo = finHoje.filter((r) => r.no_prazo === false).length;
 
   $("#kpis").innerHTML = [
     kpi({ rotulo: "Em campo", valor: campo.length, detalhe: `exportado ${haQuanto(data(snap?.campo?.atualizado_em), agora)}`, acao: "campo:" }),
@@ -462,6 +481,13 @@ function renderKpis(snap, campo, programaveis, agora) {
     kpi({ rotulo: "Vencem ≤ 30 min", valor: ate30, detalhe: "prioridade máxima", cor: ate30 ? "critico" : null, acao: "campo:critico" }),
     kpi({ rotulo: "Vencem ≤ 1h", valor: ate60, detalhe: "inclui as de ≤ 30 min", cor: ate60 ? "alerta" : null, acao: "campo:alerta" }),
     kpi({ rotulo: "Vencem hoje", valor: hoje, detalhe: "ainda no prazo" }),
+    kpi({
+      rotulo: "Finalizadas hoje",
+      valor: finHoje.length,
+      detalhe: finHoje.length ? `${finNoPrazo} no prazo · ${finForaPrazo} fora do prazo` : "nenhuma ainda",
+      cor: finHoje.length ? "ok" : null,
+      acao: "finalizadas:",
+    }),
     kpi({ rotulo: "Programáveis", valor: totalProg, detalhe: novasProg ? `${novasProg} nova(s) em 1h` : "aguardando designação", cor: totalProg ? "atencao" : null, acao: "programaveis:" }),
     kpi({
       rotulo: "Próximo vencimento em",
@@ -474,10 +500,12 @@ function renderKpis(snap, campo, programaveis, agora) {
   ].join("");
 }
 
-function renderAbas(campo, programaveis) {
+function renderAbas(campo, programaveis, finalizadas, agora) {
+  const finHoje = finalizadas.filter((r) => finalizadaHoje(r, agora));
   $("#cont-campo").textContent = campo.length;
   $("#cont-programaveis").textContent = programaveis.length;
-  $("#cont-equipes").textContent = new Set(campo.map((r) => r.equipe || "")).size;
+  $("#cont-finalizadas").textContent = finHoje.length;
+  $("#cont-equipes").textContent = new Set([...campo, ...finHoje].map((r) => r.equipe || "")).size;
   $("#aba-acessos").hidden = !ehAdmin();
   const pendentes = estado.acessos.filter((a) => a.status === "pendente").length;
   $("#cont-acessos").textContent = pendentes;
@@ -493,18 +521,28 @@ function preencherSelect(sel, valores, atual, rotuloTodos) {
   sel.value = atual;
 }
 
-function renderFiltros(campo) {
+function renderFiltros(campo, finalizadas) {
   $("#filtros").hidden = estado.aba === "equipes" || estado.aba === "acessos";
-  const soCampo = estado.aba === "campo";
-  $("#filtro-equipe").hidden = !soCampo;
-  $("#filtro-bairro").hidden = !soCampo;
-  const unicos = (campo_) => [...new Set(campo.map((r) => r[campo_] || ""))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const comEquipe = ABAS_COM_EQUIPE.has(estado.aba);
+  const ehFinalizadas = estado.aba === "finalizadas";
+  $("#filtro-equipe").hidden = !comEquipe;
+  $("#filtro-bairro").hidden = !comEquipe;
+  $("#filtro-urgencia").hidden = ehFinalizadas;
+  $("#filtro-periodo").hidden = !ehFinalizadas;
+  const base = ehFinalizadas ? finalizadas : campo;
+  const unicos = (campo_) => [...new Set(base.map((r) => r[campo_] || ""))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   preencherSelect($("#filtro-equipe"), unicos("equipe"), estado.equipe, "Todas as equipes");
   preencherSelect($("#filtro-bairro"), unicos("bairro"), estado.bairro, "Todos os bairros");
   for (const c of $$("#filtro-urgencia .chip")) c.setAttribute("aria-pressed", String(c.dataset.urg === estado.urg));
+  for (const c of $$("#filtro-periodo .chip")) c.setAttribute("aria-pressed", String(c.dataset.periodo === estado.periodo));
 }
 
 // ---------- colunas ----------
+function textoSituacaoFinalizada(r) {
+  if (r.no_prazo === true) return r._folga != null && r._folga >= 1 ? `no prazo · ${duracao(r._folga)} antes` : "no prazo";
+  if (r.no_prazo === false) return `fora do prazo · ${duracao(r._folga ?? 0)} depois`;
+  return "sem prazo";
+}
 const celRestante = (r) => `<span class="badge">${esc(textoRestante(r._min))}</span>`;
 const COLUNAS = {
   campo: [
@@ -531,16 +569,29 @@ const COLUNAS = {
     { id: "tipo", rotulo: "Tipo", valor: (r) => r.tipo, html: (r) => `${esc(r.tipo)}${r.atividade ? `<div class="secundario">${esc(r.atividade)}</div>` : ""}`, cheio: true },
     { id: "entrou", rotulo: "Entrou", valor: (r) => r.primeiro_visto_em, html: (r, agora) => `<span class="secundario">${esc(haQuanto(data(r.primeiro_visto_em), agora))}</span>` },
   ],
+  finalizadas: [
+    { id: "finalizada", rotulo: "Finalizada em", valor: (r) => r.finalizada_em, html: (r) => `<span class="num">${esc(diaHora(r._fim))}</span>` },
+    { id: "situacao", rotulo: "Situação", valor: (r) => r._folga, html: (r) => `<span class="badge">${esc(textoSituacaoFinalizada(r))}</span>` },
+    { id: "vencimento", rotulo: "Vencimento", valor: (r) => r.vencimento, html: (r) => `<span class="num">${esc(diaHora(r._venc))}</span>` },
+    { id: "ordem", rotulo: "Ordem", valor: (r) => r.ordem, html: (r) => `<span class="num">${esc(r.ordem)}</span>` },
+    { id: "tdc", rotulo: "TdC", valor: (r) => r.tdc, html: (r) => `<span class="num">${esc(r.tdc)}</span>` },
+    { id: "cliente", rotulo: "Cliente", valor: (r) => r.cliente, html: (r) => `<span class="num">${esc(r.cliente)}</span>${r.nome_cliente ? `<div class="secundario">${esc(r.nome_cliente)}</div>` : ""}` },
+    { id: "equipe", rotulo: "Equipe", valor: (r) => r.equipe, html: (r) => esc(r.equipe) },
+    { id: "bairro", rotulo: "Bairro", valor: (r) => r.bairro, html: (r) => `${esc(r.bairro)}${r.endereco ? `<div class="secundario celula-endereco" title="${esc(r.endereco)}">${esc(r.endereco)}</div>` : ""}`, cheio: true },
+    { id: "tipo", rotulo: "Tipo", valor: (r) => r.tipo, html: (r) => esc(r.tipo), cheio: true },
+    { id: "resultado", rotulo: "Resultado", valor: (r) => r.resultado, html: (r) => `${esc(r.resultado || "—")}${r.causa ? `<div class="secundario">${esc(r.causa)}</div>` : ""}`, cheio: true },
+  ],
   equipes: [
     { id: "equipe", rotulo: "Equipe", valor: (r) => r.equipe, html: (r) => `<button class="link-equipe" data-equipe="${esc(r.equipe)}">${esc(r.equipe || "(sem equipe)")}</button>` },
     { id: "total", rotulo: "Em campo", valor: (r) => r.total, html: (r) => `<span class="num">${r.total}</span>` },
     { id: "vencidas", rotulo: "Vencidas", valor: (r) => r.vencidas, html: (r) => `<span class="num" style="color:${r.vencidas ? "var(--vencida)" : "var(--texto-3)"}">${r.vencidas}</span>` },
+    { id: "finalizadas", rotulo: "Finalizadas hoje", valor: (r) => r.finalizadas, html: (r) => `<span class="num" style="color:${r.finalizadas ? "var(--ok)" : "var(--texto-3)"}">${r.finalizadas}</span>` },
     { id: "ate60", rotulo: "Vencem ≤ 1h", valor: (r) => r.ate60, html: (r) => `<span class="num" style="color:${r.ate60 ? "var(--alerta)" : "var(--texto-3)"}">${r.ate60}</span>` },
     { id: "restante", rotulo: "Próximo vencimento", valor: (r) => r._min, html: (r) => r._min == null ? `<span class="fraco">—</span>` : celRestante(r) },
     { id: "distribuicao", rotulo: "Distribuição", valor: null, html: (r) => {
       const seg = ["vencida", "critico", "alerta", "atencao", "ok", "sem"]
         .filter((u) => r.dist[u])
-        .map((u) => `<span style="width:${(r.dist[u] / r.total) * 100}%;background:var(--${u})" title="${u}: ${r.dist[u]}"></span>`)
+        .map((u) => `<span style="width:${(r.dist[u] / (r.total || 1)) * 100}%;background:var(--${u})" title="${u}: ${r.dist[u]}"></span>`)
         .join("");
       return `<div class="barra">${seg}</div>`;
     }, cheio: true },
@@ -567,12 +618,15 @@ COLUNAS.acessos = [
   } },
 ];
 
-function agruparPorEquipe(campo) {
+function agruparPorEquipe(campo, finalizadasHoje = []) {
   const grupos = new Map();
+  const grupo = (k) => {
+    if (!grupos.has(k)) grupos.set(k, { equipe: k, total: 0, vencidas: 0, ate60: 0, finalizadas: 0, _min: null, dist: {} });
+    return grupos.get(k);
+  };
+  for (const r of finalizadasHoje) grupo(r.equipe || "").finalizadas++;
   for (const r of campo) {
-    const k = r.equipe || "";
-    if (!grupos.has(k)) grupos.set(k, { equipe: k, total: 0, vencidas: 0, ate60: 0, _min: null, dist: {} });
-    const g = grupos.get(k);
+    const g = grupo(r.equipe || "");
     g.total++;
     if (FILTRO_URGENCIA.vencida(r._min)) g.vencidas++;
     if (FILTRO_URGENCIA.alerta(r._min)) g.ate60++;
@@ -585,14 +639,17 @@ function agruparPorEquipe(campo) {
 
 function filtrar(linhas, aba = estado.aba) {
   const termo = estado.texto.trim().toLowerCase();
+  const agora = new Date();
   return linhas.filter((r) => {
-    if (aba === "campo") {
+    if (ABAS_COM_EQUIPE.has(aba)) {
       if (estado.equipe && (r.equipe || "") !== estado.equipe) return false;
       if (estado.bairro && (r.bairro || "") !== estado.bairro) return false;
     }
-    if (estado.urg && !FILTRO_URGENCIA[estado.urg](r._min)) return false;
+    if (aba === "finalizadas") {
+      if (estado.periodo === "hoje" && !finalizadaHoje(r, agora)) return false;
+    } else if (estado.urg && !FILTRO_URGENCIA[estado.urg](r._min)) return false;
     if (termo) {
-      const alvo = [r.ordem, r.tdc, r.cliente, r.equipe, r.bairro, r.tipo, r.endereco, r.nome_cliente].join(" ").toLowerCase();
+      const alvo = [r.ordem, r.tdc, r.cliente, r.equipe, r.bairro, r.tipo, r.endereco, r.nome_cliente, r.resultado].join(" ").toLowerCase();
       if (!alvo.includes(termo)) return false;
     }
     return true;
@@ -614,18 +671,22 @@ function ordenar(linhas, colunas, aba = estado.aba) {
 }
 
 // Linhas de uma aba já filtradas e ordenadas, como aparecem na tabela.
-function linhasDaAba(campo, programaveis, aba = estado.aba) {
+function linhasDaAba(campo, programaveis, finalizadas, aba = estado.aba) {
   let linhas;
   if (aba === "campo") linhas = filtrar(campo, aba);
   else if (aba === "programaveis") linhas = filtrar(programaveis, aba);
+  else if (aba === "finalizadas") linhas = filtrar(finalizadas, aba);
   else if (aba === "acessos") linhas = estado.acessos.map((a) => ({ ...a, _urg: a.status === "pendente" ? "alerta" : a.status === "recusado" ? "sem" : "ok" }));
-  else linhas = agruparPorEquipe(campo);
+  else {
+    const agora = new Date();
+    linhas = agruparPorEquipe(campo, finalizadas.filter((r) => finalizadaHoje(r, agora)));
+  }
   return ordenar(linhas, COLUNAS[aba], aba);
 }
 
-function renderTabela(campo, programaveis, agora) {
+function renderTabela(campo, programaveis, finalizadas, agora) {
   const colunas = COLUNAS[estado.aba];
-  const linhas = linhasDaAba(campo, programaveis);
+  const linhas = linhasDaAba(campo, programaveis, finalizadas);
 
   const { col, dir } = estado.ordem[estado.aba];
   $("#tabela-cabecalho").innerHTML = `<tr>${colunas.map((c) => {
@@ -645,12 +706,19 @@ function renderTabela(campo, programaveis, agora) {
   vazio.hidden = linhas.length > 0;
   $("#tabela").hidden = linhas.length === 0;
   if (!linhas.length) {
-    const temDados = estado.aba === "programaveis" ? programaveis.length : campo.length;
+    const base = { programaveis, finalizadas }[estado.aba] || campo;
+    const temDados = estado.aba === "finalizadas" && estado.periodo === "hoje"
+      ? finalizadas.some((r) => finalizadaHoje(r, agora))
+      : base.length > 0;
+    const semDados = {
+      programaveis: "Nenhuma religação programável no momento.",
+      finalizadas: estado.periodo === "hoje" ? "Nenhuma ordem finalizada hoje." : "Nenhuma ordem finalizada no período da extração.",
+    }[estado.aba] || "Nenhuma religação em campo no relatório.";
     vazio.textContent = estado.aba === "acessos"
       ? "Nenhum pedido de acesso."
       : !estado.snapshot
       ? "Carregando…"
-      : temDados ? "Nenhuma ordem com esses filtros." : estado.aba === "programaveis" ? "Nenhuma religação programável no momento." : "Nenhuma religação em campo no relatório.";
+      : temDados ? "Nenhuma ordem com esses filtros." : semDados;
   }
 
   if (estado.aba === "programaveis" && estado.snapshot) {
@@ -665,7 +733,7 @@ function renderTabela(campo, programaveis, agora) {
 // ------------------------------------------------------------------
 // RELATÓRIO (XLSX)
 // ------------------------------------------------------------------
-// Uma planilha formatada com duas abas (Em campo e Programáveis), cada uma
+// Uma planilha formatada com três abas (Em campo, Programáveis e Finalizadas), cada uma
 // com as ordens como aparecem no painel (filtros e ordenação daquela aba).
 // A ExcelJS só é baixada no primeiro clique.
 const URL_EXCELJS = "https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
@@ -720,6 +788,21 @@ const COLUNAS_RELATORIO = {
     ["Situação", (r) => NOME_URGENCIA[r._urg], "urgencia"],
     ["Entrou no painel", (r) => dataBrasilia(data(r.primeiro_visto_em)), "data"],
   ],
+  finalizadas: [
+    ["Ordem", (r) => r.ordem],
+    ["TdC", (r) => r.tdc],
+    ["Cliente", (r) => r.cliente],
+    ["Nome do cliente", (r) => r.nome_cliente],
+    ["Equipe", (r) => r.equipe],
+    ["Bairro", (r) => r.bairro],
+    ["Endereço", (r) => r.endereco],
+    ["Tipo", (r) => r.tipo],
+    ["Vencimento", (r) => dataBrasilia(r._venc), "data"],
+    ["Finalizada em", (r) => dataBrasilia(r._fim), "data"],
+    ["Situação", (r) => textoSituacaoFinalizada(r), "urgencia"],
+    ["Resultado", (r) => r.resultado],
+    ["Causa", (r) => r.causa],
+  ],
 };
 
 let exceljs = null;
@@ -735,9 +818,10 @@ function carregarExcelJS() {
 function descreverFiltros(aba) {
   const f = [];
   if (estado.texto.trim()) f.push(`busca "${estado.texto.trim()}"`);
-  if (estado.urg) f.push($(`#filtro-urgencia [data-urg="${estado.urg}"]`)?.textContent || estado.urg);
-  if (aba === "campo" && estado.equipe) f.push(`equipe ${estado.equipe}`);
-  if (aba === "campo" && estado.bairro) f.push(`bairro ${estado.bairro}`);
+  if (aba === "finalizadas") f.push(estado.periodo === "hoje" ? "finalizadas hoje" : "período da extração");
+  else if (estado.urg) f.push($(`#filtro-urgencia [data-urg="${estado.urg}"]`)?.textContent || estado.urg);
+  if (ABAS_COM_EQUIPE.has(aba) && estado.equipe) f.push(`equipe ${estado.equipe}`);
+  if (ABAS_COM_EQUIPE.has(aba) && estado.bairro) f.push(`bairro ${estado.bairro}`);
   return f.length ? `Filtros: ${f.join(", ")}` : "Sem filtros";
 }
 
@@ -810,6 +894,7 @@ async function exportarRelatorio() {
   const agora = new Date();
   const campo = enriquecer(estado.snapshot.campo?.registros, agora);
   const programaveis = enriquecer(estado.snapshot.programaveis?.registros, agora);
+  const finalizadas = enriquecerFinalizadas(estado.snapshot.campo?.finalizadas);
 
   const btn = $("#btn-exportar");
   btn.disabled = true;
@@ -819,8 +904,13 @@ async function exportarRelatorio() {
     wb.creator = "ARGOS";
     wb.created = agora;
     const geradoEm = fmtCompleto.format(agora).replace(",", "");
-    for (const [aba, nome, titulo] of [["campo", "Em campo", "Religas em campo"], ["programaveis", "Programáveis", "Religas programáveis"]]) {
-      const linhas = linhasDaAba(campo, programaveis, aba);
+    const abas = [
+      ["campo", "Em campo", "Religas em campo"],
+      ["programaveis", "Programáveis", "Religas programáveis"],
+      ["finalizadas", "Finalizadas", "Religas finalizadas"],
+    ];
+    for (const [aba, nome, titulo] of abas) {
+      const linhas = linhasDaAba(campo, programaveis, finalizadas, aba);
       const resumo = `Gerado em ${geradoEm} · ${linhas.length} ${linhas.length === 1 ? "ordem" : "ordens"} · ${descreverFiltros(aba)}`;
       abaPlanilha(wb, nome, titulo, resumo, COLUNAS_RELATORIO[aba], linhas);
     }
@@ -854,6 +944,7 @@ $("#kpis").addEventListener("click", (ev) => {
   if (!alvo) return;
   const [aba, urg] = alvo.dataset.acao.split(":");
   estado.urg = urg || "";
+  if (aba === "finalizadas") estado.periodo = "hoje";
   estado.equipe = "";
   estado.bairro = "";
   trocarAba(aba);
@@ -864,7 +955,7 @@ $("#tabela-cabecalho").addEventListener("click", (ev) => {
   if (!th) return;
   const o = estado.ordem[estado.aba];
   if (o.col === th.dataset.col) o.dir *= -1;
-  else { o.col = th.dataset.col; o.dir = th.dataset.col === "vencidas" || th.dataset.col === "total" || th.dataset.col === "ate60" ? -1 : 1; }
+  else { o.col = th.dataset.col; o.dir = ["vencidas", "total", "ate60", "finalizadas", "finalizada"].includes(th.dataset.col) ? -1 : 1; }
   renderizar();
 });
 
@@ -891,6 +982,13 @@ $("#filtro-urgencia").addEventListener("click", (ev) => {
   const c = ev.target.closest(".chip");
   if (!c) return;
   estado.urg = estado.urg === c.dataset.urg ? "" : c.dataset.urg;
+  renderizar();
+});
+
+$("#filtro-periodo").addEventListener("click", (ev) => {
+  const c = ev.target.closest(".chip");
+  if (!c) return;
+  estado.periodo = c.dataset.periodo;
   renderizar();
 });
 

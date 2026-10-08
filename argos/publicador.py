@@ -40,7 +40,7 @@ _snapshot = {
     },
     "status": {},
     "programaveis": {"atualizado_em": None, "total": 0, "registros": []},
-    "campo": {"atualizado_em": None, "arquivo": None, "registros": []},
+    "campo": {"atualizado_em": None, "arquivo": None, "registros": [], "finalizadas": []},
 }
 _ultimo_erro_upstash = None
 

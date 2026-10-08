@@ -400,7 +400,7 @@ if __name__ == "__main__":
 
     from argos.eorder.driver import abrir_driver, fechar_driver
     from argos.eorder.sessao import login
-    from argos.planilha import imprimir_tabela, ler_religas_em_campo
+    from argos.planilha import imprimir_exportacao, ler_exportacao_campo
 
     parser = argparse.ArgumentParser(description="Exporta e lê a planilha de religas em campo.")
     parser.add_argument("--arquivo", help="Só lê uma planilha já baixada, sem abrir o eOrder.")
@@ -417,4 +417,4 @@ if __name__ == "__main__":
         finally:
             fechar_driver(drv)
 
-    imprimir_tabela(ler_religas_em_campo(caminho))
+    imprimir_exportacao(ler_exportacao_campo(caminho))

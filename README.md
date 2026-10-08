@@ -34,6 +34,11 @@ VPS Hostinger (Docker)                          Vercel
   - tipo (`Tipo de Serviço`)
   - vencimento (`Prazo ANS Legal`)
 - Só entram as ordens do município de Maricá cujo `Código Equipe` começa com `NI2` (equipes da CENEGED).
+- Separa as ordens em aberto das finalizadas pela coluna `Estado TdC` (estados em `ARGOS_ESTADOS_FINALIZADOS`). Para isso o filtro salvo precisa incluir também os estados de finalizada/encerrada.
+  - As em aberto alimentam a aba "Em campo" e os pushes de vencimento.
+  - As finalizadas alimentam o indicador "Finalizadas hoje" (no prazo x fora do prazo), a aba "Finalizadas", a coluna da aba "Por equipe" e a aba "Finalizadas" do relatório Excel. Não geram push.
+  - A hora de finalização é a maior `Data Fim` da aba `Linhas TdC` da planilha. Sem ela, vale a hora da primeira exportação em que a ordem apareceu finalizada.
+  - Para ver os estados que vêm na planilha: `python -m argos.planilha <arquivo>`. O comando lista a contagem por `Estado TdC` e como cada um foi classificado.
 
 **Pushes de vencimento**, em duas categorias: ordens em campo (reavaliadas a cada 5 min) e programáveis (a cada checagem de 1 min):
 - 2h antes do vencimento
@@ -164,6 +169,7 @@ Todas as opções estão comentadas em [`.env.example`](.env.example). As princi
 | `ARGOS_FILTRO_CAMPO` | `PARCIAL RELIGA CENEGED - MARICÁ` | Filtro salvo da Busca TdC |
 | `ARGOS_MUNICIPIO_CAMPO` | `MARICÁ` | Município das ordens em campo e das programáveis (sem diferenciar acento/caixa) |
 | `ARGOS_PREFIXO_EQUIPE_CAMPO` | `NI2` | Prefixo do `Código Equipe` das equipes da CENEGED |
+| `ARGOS_ESTADOS_FINALIZADOS` | `Finalizado,Encerrado,Concluído` | Valores de `Estado TdC` que contam como finalizada (sem diferenciar acento/caixa, por prefixo) |
 | `ARGOS_INTERVALO_CAMPO_MIN` | `30` | Intervalo entre exportações |
 | `ARGOS_CAMPO_DIAS_ATRAS` | `7` | Data de lançamento: de N dias atrás até hoje |
 | `ARGOS_ID_DATA_LANC_INICIO` / `_FIM` | `698246` / `698247` | IDs dos campos de data. Ajuste se o eOrder mudar |
@@ -173,5 +179,6 @@ Todas as opções estão comentadas em [`.env.example`](.env.example). As princi
 ## Limitações conhecidas
 
 - Programáveis: só a primeira página da grade (~25 linhas) é lida. O total vem do título "Lista Atividades (N)", e o painel avisa quando há mais linhas do que as exibidas.
+- Finalizadas: só aparecem as ordens com data de lançamento dentro da janela da Busca TdC (`ARGOS_CAMPO_DIAS_ATRAS`) e são atualizadas a cada exportação (30 min). Canceladas não contam como finalizadas, a menos que o estado esteja em `ARGOS_ESTADOS_FINALIZADOS`.
 - `ARGOS_DIAS_UTEIS_PRAZO` está em 2, que é temporário. A regra real é 1.
 - Os seletores do menu de opções da Busca TdC e da lista de exportação são XPaths absolutos herdados do projeto Produção SOC e podem quebrar se o layout mudar. Quando algo falha, o screenshot vai para `/data/debug`.

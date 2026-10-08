@@ -96,6 +96,12 @@ FILTRO_CAMPO = _env_str("ARGOS_FILTRO_CAMPO", "PARCIAL RELIGA CENEGED - MARICÁ"
 # as de equipes cujo "Código Equipe" começa com o prefixo (NI2 = CENEGED).
 MUNICIPIO_CAMPO = _env_str("ARGOS_MUNICIPIO_CAMPO", "MARICÁ")
 PREFIXO_EQUIPE_CAMPO = _env_str("ARGOS_PREFIXO_EQUIPE_CAMPO", "NI2")
+# Valores de "Estado TdC" que contam como ordem finalizada (o filtro salvo
+# precisa incluir esses estados). Comparados sem acento/caixa e por prefixo
+# ("Finalizado" pega "Finalizado com sucesso"). O resto é ordem em aberto.
+ESTADOS_FINALIZADOS = [
+    x.strip() for x in (_env_str("ARGOS_ESTADOS_FINALIZADOS", "Finalizado,Encerrado,Concluído") or "").split(",") if x.strip()
+]
 INTERVALO_CAMPO_MINUTOS = _env_int("ARGOS_INTERVALO_CAMPO_MIN", 30)
 # Se a exportação falhar, tenta de novo depois desse tempo (em vez de
 # esperar o intervalo cheio de 30 min).

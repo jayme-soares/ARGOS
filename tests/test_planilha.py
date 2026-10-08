@@ -5,7 +5,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from argos.planilha import converter_data, ler_religas_em_campo
+from argos.planilha import converter_data, ler_exportacao_campo, ler_religas_em_campo
 
 CABECALHO = [
     "CO", "Código TdC", "Numero de Serviço", " Tipo de Serviço", "Código Cliente",
@@ -69,6 +69,41 @@ class TestPlanilha(unittest.TestCase):
         caminho = self.dir / "export.xls"
         caminho.write_text(html, encoding="utf-8")
         self.conferir(ler_religas_em_campo(caminho))
+
+    def test_separa_finalizadas(self):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "TdC"
+        ws.append(["Código TdC", "Numero de Serviço", "Tipo de Serviço", "Código Cliente", "Município",
+                   "Bairro", "Código Equipe", "Prazo ANS Legal", "Estado TdC"])
+        ws.append([1001, "A1", "OUTREA", 1, "MARICA", "Centro", "NI201LRP-B", "30/09/2026 12:00", "Enviado ao Campo"])
+        ws.append([1002, "A2", "OUTREA", 2, "MARICA", "Centro", "NI202LRP-B", "30/09/2026 12:00", "Finalizado"])
+        ws.append([1003, "A3", "OUTREA", 3, "MARICA", "Inoã", "NI203LRP-B", "30/09/2026 12:00", " ENCERRADO "])
+        ws.append([1004, "A4", "OUTREA", 4, "MARICA", "Inoã", "NI204LRP-B", "30/09/2026 12:00", "Concluído"])
+        # fora do escopo: finalizadas de outro município e de equipe de outra empresa
+        ws.append([1005, "A5", "OUTREA", 5, "NITEROI", "Icaraí", "NI201LRP-B", "30/09/2026 12:00", "Finalizado"])
+        ws.append([1006, "A6", "OUTREA", 6, "MARICA", "Centro", "084941", "30/09/2026 12:00", "Finalizado"])
+        linhas = wb.create_sheet("Linhas TdC")
+        linhas.append(["Código TdC", "Resultado", "Causa/Descritivo Resultado", "Data Fim"])
+        linhas.append([1002, "Não Realizado", "FJL - Fim da Jornada Laborativa", "29/09/2026 17:00"])
+        linhas.append([1002, "Realizado", "", "30/09/2026 10:15"])  # a mais recente vale
+        linhas.append([1003, "Realizado", "", "30/09/2026 13:40"])  # depois do prazo
+        caminho = self.dir / "export.xlsx"
+        wb.save(caminho)
+
+        dados = ler_exportacao_campo(caminho)
+        self.assertEqual([r["tdc"] for r in dados["em_aberto"]], ["1001"])
+        finalizadas = {r["tdc"]: r for r in dados["finalizadas"]}
+        self.assertEqual(list(finalizadas), ["1003", "1002", "1004"])  # mais recente primeiro, sem data no fim
+        self.assertTrue(finalizadas["1002"]["finalizada_em"].startswith("2026-09-30T10:15"))
+        self.assertEqual(finalizadas["1002"]["resultado"], "Realizado")
+        self.assertTrue(finalizadas["1002"]["no_prazo"])
+        self.assertFalse(finalizadas["1003"]["no_prazo"])
+        self.assertIsNone(finalizadas["1004"]["finalizada_em"])
+        self.assertIsNone(finalizadas["1004"]["no_prazo"])
+        self.assertEqual(dados["estados"]["Finalizado"], 3)
+        self.assertEqual(dados["estados"]["Enviado ao Campo"], 1)
+        self.assertEqual([r["tdc"] for r in ler_religas_em_campo(caminho)], ["1001"])
 
     def test_coluna_faltando_explica(self):
         wb = Workbook()

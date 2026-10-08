@@ -48,6 +48,16 @@ COLUNAS_OPCIONAIS = {
     "nome_cliente": "Nome e Sobrenome Cliente",
 }
 
+# Aba com uma linha por operação do TdC: dá a hora em que a ordem foi
+# finalizada (maior "Data Fim") e o resultado.
+ABA_LINHAS = "Linhas TdC"
+COLUNAS_LINHAS = {
+    "tdc": "Código TdC",
+    "data_fim": "Data Fim",
+    "resultado": "Resultado",
+    "causa": "Causa/Descritivo Resultado",
+}
+
 FORMATOS_DATA = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S")
 
 
@@ -256,28 +266,100 @@ def _pertence_ao_escopo(municipio: str, equipe: str) -> bool:
     return equipe.upper().startswith(config.PREFIXO_EQUIPE_CAMPO.upper())
 
 
-def ler_religas_em_campo(caminho: Path | str) -> list[dict]:
-    """Lista de ordens em aberto do município/equipes do escopo, deduplicada
-    por TdC e ordenada pelo vencimento (sem vencimento vão para o fim).
-    `vencimento` sai em ISO 8601 com fuso, pronto para o JSON do painel."""
+def _eh_finalizada(estado_tdc: str) -> bool:
+    estado = normalizar_texto(estado_tdc)
+    return bool(estado) and any(estado.startswith(normalizar_texto(e)) for e in config.ESTADOS_FINALIZADOS)
+
+
+def _ler_fim_por_tdc(abas: dict[str, pd.DataFrame]) -> dict[str, dict]:
+    """Da aba "Linhas TdC" (uma linha por operação): por TdC, a maior "Data
+    Fim" e o resultado dessa mesma linha. Aba ou colunas ausentes = {}."""
+    df = next(
+        (_com_cabecalho(d) for nome, d in abas.items() if normalizar_texto(nome) == normalizar_texto(ABA_LINHAS)),
+        None,
+    )
+    if df is None:
+        return {}
+    por_normalizado = {}
+    for col in df.columns:
+        por_normalizado.setdefault(normalizar_texto(col), col)
+    mapa = {campo: por_normalizado.get(normalizar_texto(nome)) for campo, nome in COLUNAS_LINHAS.items()}
+    if mapa["tdc"] is None or mapa["data_fim"] is None:
+        return {}
+
+    fins: dict[str, dict] = {}
+    for _, linha in df.iterrows():
+        tdc = _texto(linha[mapa["tdc"]])
+        data_fim = converter_data(linha[mapa["data_fim"]])
+        if not tdc or data_fim is None:
+            continue
+        if tdc in fins and fins[tdc]["data_fim"] >= data_fim:
+            continue
+        fins[tdc] = {
+            "data_fim": data_fim,
+            "resultado": _texto(linha[mapa["resultado"]]) if mapa["resultado"] else "",
+            "causa": _texto(linha[mapa["causa"]]) if mapa["causa"] else "",
+        }
+    return fins
+
+
+def ler_exportacao_campo(caminho: Path | str) -> dict:
+    """Separa as ordens do município/equipes do escopo em abertas e
+    finalizadas (pelo "Estado TdC", ver config.ESTADOS_FINALIZADOS),
+    deduplicadas por TdC.
+
+    - em_aberto: ordenadas pelo vencimento (sem vencimento vão para o fim).
+    - finalizadas: com `finalizada_em` (maior "Data Fim" da aba Linhas TdC;
+      None se não houver), `resultado`, `causa` e `no_prazo`; ordenadas da
+      mais recente para a mais antiga.
+    - estados: contagem de TdCs por "Estado TdC" na planilha inteira, antes
+      do filtro de escopo (para descobrir os nomes dos estados).
+
+    Datas saem em ISO 8601 com fuso, prontas para o JSON do painel."""
     caminho = Path(caminho)
     abas = _ler_bruto(caminho.read_bytes(), caminho.name)
     df = _escolher_aba(abas)
     mapa = _mapear_colunas(df)
 
-    registros: dict[str, dict] = {}
+    vistos: set[str] = set()
+    estados: dict[str, int] = {}
+    em_aberto: list[dict] = []
+    finalizadas: list[dict] = []
+    fins = None
     for _, linha in df.iterrows():
         tdc = _texto(linha[mapa["tdc"]])
-        if not tdc or tdc in registros:
+        if not tdc or tdc in vistos:
             continue
+        vistos.add(tdc)
+        estado_tdc = _texto(linha[mapa["estado_tdc"]]) if "estado_tdc" in mapa else ""
+        estados[estado_tdc] = estados.get(estado_tdc, 0) + 1
         if not _pertence_ao_escopo(_texto(linha[mapa["municipio"]]), _texto(linha[mapa["equipe"]])):
             continue
         venc = converter_data(linha[mapa["vencimento"]])
         registro = {campo: _texto(linha[col]) for campo, col in mapa.items() if campo != "vencimento"}
         registro["vencimento"] = venc.isoformat(timespec="minutes") if venc else None
-        registros[tdc] = registro
+        if not _eh_finalizada(estado_tdc):
+            em_aberto.append(registro)
+            continue
 
-    return sorted(registros.values(), key=lambda r: (r["vencimento"] is None, r["vencimento"] or ""))
+        if fins is None:
+            fins = _ler_fim_por_tdc(abas)
+        fim = fins.get(tdc, {})
+        data_fim = fim.get("data_fim")
+        registro["finalizada_em"] = data_fim.isoformat(timespec="minutes") if data_fim else None
+        registro["resultado"] = fim.get("resultado", "")
+        registro["causa"] = fim.get("causa", "")
+        registro["no_prazo"] = data_fim <= venc if data_fim and venc else None
+        finalizadas.append(registro)
+
+    em_aberto.sort(key=lambda r: (r["vencimento"] is None, r["vencimento"] or ""))
+    finalizadas.sort(key=lambda r: r["finalizada_em"] or "", reverse=True)
+    return {"em_aberto": em_aberto, "finalizadas": finalizadas, "estados": estados}
+
+
+def ler_religas_em_campo(caminho: Path | str) -> list[dict]:
+    """Só as ordens em aberto (ver ler_exportacao_campo)."""
+    return ler_exportacao_campo(caminho)["em_aberto"]
 
 
 def imprimir_tabela(registros: list[dict]):
@@ -291,8 +373,27 @@ def imprimir_tabela(registros: list[dict]):
         )
 
 
+def imprimir_exportacao(dados: dict):
+    """Ordens em aberto, finalizadas e a contagem por "Estado TdC" — serve
+    para conferir quais estados entram em ARGOS_ESTADOS_FINALIZADOS."""
+    print("Estado TdC (planilha inteira, antes do filtro de município/equipe):")
+    for estado, n in sorted(dados["estados"].items(), key=lambda x: -x[1]):
+        marca = "finalizada" if _eh_finalizada(estado) else "em aberto"
+        print(f"  {n:>5}  {estado or '(vazio)':<40} -> {marca}")
+    print()
+    imprimir_tabela(dados["em_aberto"])
+    print()
+    print(f"{len(dados['finalizadas'])} ordem(ns) finalizada(s)")
+    print(f"{'ORDEM':<12} {'TDC':<12} {'EQUIPE':<22} {'VENCIMENTO':<17} {'FINALIZADA EM':<17} {'PRAZO':<6} RESULTADO")
+    for r in dados["finalizadas"]:
+        venc = r["vencimento"][:16].replace("T", " ") if r["vencimento"] else "-"
+        fim = r["finalizada_em"][:16].replace("T", " ") if r["finalizada_em"] else "-"
+        prazo = {True: "ok", False: "fora", None: "-"}[r["no_prazo"]]
+        print(f"{r['ordem'][:12]:<12} {r['tdc'][:12]:<12} {r['equipe'][:22]:<22} {venc:<17} {fim:<17} {prazo:<6} {r['resultado']}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Uso: python -m argos.planilha caminho/da/planilha")
         sys.exit(1)
-    imprimir_tabela(ler_religas_em_campo(sys.argv[1]))
+    imprimir_exportacao(ler_exportacao_campo(sys.argv[1]))

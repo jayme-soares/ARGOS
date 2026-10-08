@@ -31,7 +31,7 @@ from argos.eorder.ui import debug_screenshot
 from argos.estado import carregar_json, salvar_json
 from argos.log import log
 from argos.notificacao import enviar_notificacao_push
-from argos.planilha import ler_religas_em_campo
+from argos.planilha import ler_exportacao_campo
 
 LOCK_EORDER = threading.Lock()
 _sessao_programaveis_invalidada = threading.Event()
@@ -285,6 +285,7 @@ class MonitorCampo(threading.Thread):
         super().__init__(name=self.NOME, daemon=True)
         secao = publicador.obter_secao("campo") or {}
         self.registros = secao.get("registros") or []
+        self.finalizadas = secao.get("finalizadas") or []
         self.atualizado_em = datetime.fromisoformat(secao["atualizado_em"]) if secao.get("atualizado_em") else None
         self.arquivo = secao.get("arquivo")
         self.proxima_extracao = _agora()  # exporta assim que entrar na janela
@@ -311,27 +312,52 @@ class MonitorCampo(threading.Thread):
             "proxima_extracao": self.proxima_extracao.isoformat(timespec="seconds"),
             "arquivo": self.arquivo,
             "registros": self.registros,
+            "finalizadas": self.finalizadas,
         })
+
+    def _completar_finalizadas(self, finalizadas, agora):
+        """Sem "Data Fim" na planilha, a hora de finalização fica sendo a da
+        primeira exportação em que a ordem apareceu finalizada (guardada na
+        seção do snapshot, então sobrevive a um restart)."""
+        anteriores = {r["tdc"]: r.get("finalizada_em") for r in self.finalizadas}
+        for r in finalizadas:
+            if r["finalizada_em"]:
+                continue
+            r["finalizada_em"] = anteriores.get(r["tdc"]) or agora.isoformat(timespec="minutes")
+            if r["vencimento"]:
+                r["no_prazo"] = datetime.fromisoformat(r["finalizada_em"]) <= datetime.fromisoformat(r["vencimento"])
+        finalizadas.sort(key=lambda r: r["finalizada_em"], reverse=True)
+        return finalizadas
 
     def ciclo_exportacao(self):
         log("Iniciando exportação da Busca TdC.", self.PREFIXO)
         try:
             with _acesso_eorder(self.NOME):
                 arquivo = self._exportar()
-            registros = ler_religas_em_campo(arquivo)
+            dados = ler_exportacao_campo(arquivo)
         except Exception as e:
             self.proxima_extracao = _agora() + timedelta(minutes=config.RETENTATIVA_CAMPO_MINUTOS)
             log(f"ERRO na exportação/leitura: {e}. Nova tentativa às {self.proxima_extracao:%H:%M}.", self.PREFIXO)
             self._status(f"erro: {e}")
             return
 
+        registros = dados["em_aberto"]
         self.registros = registros
         self.arquivo = arquivo.name
         self.atualizado_em = _agora()
+        self.finalizadas = self._completar_finalizadas(dados["finalizadas"], self.atualizado_em)
         self.proxima_extracao = self.atualizado_em + timedelta(minutes=config.INTERVALO_CAMPO_MINUTOS)
         self._avisou_dados_velhos = False
         vencidas = sum(1 for r in registros if r["vencimento"] and datetime.fromisoformat(r["vencimento"]) <= self.atualizado_em)
-        log(f"{len(registros)} religa(s) em campo, {vencidas} vencida(s). Próxima exportação às {self.proxima_extracao:%H:%M}.", self.PREFIXO)
+        hoje = self.atualizado_em.date()
+        finalizadas_hoje = sum(1 for r in self.finalizadas if datetime.fromisoformat(r["finalizada_em"]).date() == hoje)
+        estados = ", ".join(f"{e or '(vazio)'}: {n}" for e, n in sorted(dados["estados"].items(), key=lambda x: -x[1]))
+        log(
+            f"{len(registros)} religa(s) em campo, {vencidas} vencida(s); {len(self.finalizadas)} finalizada(s), "
+            f"{finalizadas_hoje} hoje. Estados na planilha: {estados or '-'}. "
+            f"Próxima exportação às {self.proxima_extracao:%H:%M}.",
+            self.PREFIXO,
+        )
         self._publicar()
         self._status("ok")
 

@@ -106,6 +106,7 @@
     <nav class="abas" role="tablist">
       <button role="tab" data-aba="campo" class="aba">Em campo <span class="contador" id="cont-campo">0</span></button>
       <button role="tab" data-aba="programaveis" class="aba">Programáveis <span class="contador" id="cont-programaveis">0</span></button>
+      <button role="tab" data-aba="finalizadas" class="aba" title="Finalizadas hoje">Finalizadas <span class="contador" id="cont-finalizadas">0</span></button>
       <button role="tab" data-aba="equipes" class="aba">Por equipe <span class="contador" id="cont-equipes">0</span></button>
       <button role="tab" data-aba="acessos" class="aba" id="aba-acessos" hidden>Acessos <span class="contador" id="cont-acessos">0</span></button>
     </nav>
@@ -123,6 +124,10 @@
         <button data-urg="critico" class="chip chip-critico">≤ 30 min</button>
         <button data-urg="alerta" class="chip chip-alerta">≤ 1h</button>
         <button data-urg="atencao" class="chip chip-atencao">≤ 2h</button>
+      </div>
+      <div class="chips" id="filtro-periodo" role="group" aria-label="Período das finalizadas" hidden>
+        <button data-periodo="hoje" class="chip">Hoje</button>
+        <button data-periodo="" class="chip">Últimos 7 dias</button>
       </div>
       <button id="btn-exportar" class="btn-texto btn-exportar" title="Baixar relatório (Excel) das ordens exibidas">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
