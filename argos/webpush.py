@@ -63,17 +63,32 @@ def _rpc(funcao: str, corpo: dict):
     return r.json() if r.content else None
 
 
-def enviar(titulo: str, mensagem: str, prioridade: int = 3):
-    """Nunca derruba o loop: falhas só vão para o log."""
+def url_painel(caminho: str = "") -> str:
+    base = (config.PAINEL_URL or "").rstrip("/")
+    return f"{base}/{caminho}" if base else f"/{caminho}"
+
+
+def enviar(titulo: str, mensagem: str, prioridade: int = 3, equipe: str | None = None, tag: str | None = None) -> int:
+    """Sem `equipe`: para a gestão (todos os aprovados que não são equipe).
+    Com `equipe`: só para os aparelhos da conta daquela equipe, abrindo o
+    painel /equipe. `tag` faz o aviso novo substituir o anterior de mesma tag.
+    Nunca derruba o loop: falhas só vão para o log. Devolve quantos enviou."""
     from pywebpush import WebPushException, webpush
 
     try:
-        destinos = _rpc("argos_push_destinos", {"p_chave": config.PUSH_CHAVE}) or []
+        if equipe:
+            destinos = _rpc("argos_push_destinos_equipe", {"p_chave": config.PUSH_CHAVE, "p_equipe": equipe}) or []
+        else:
+            destinos = _rpc("argos_push_destinos", {"p_chave": config.PUSH_CHAVE}) or []
     except Exception as e:
         log(f"Falha ao buscar inscrições do painel: {e}", "NOTIFICAÇÃO")
-        return
+        return 0
 
-    payload = json.dumps({"titulo": titulo, "mensagem": mensagem, "prioridade": prioridade, "url": config.PAINEL_URL or "/"})
+    dados = {"titulo": titulo, "mensagem": mensagem, "prioridade": prioridade,
+             "url": url_painel("equipe") if equipe else (config.PAINEL_URL or "/")}
+    if tag:
+        dados["tag"] = tag
+    payload = json.dumps(dados)
     expiradas, enviados = [], 0
     for d in destinos:
         try:
@@ -101,8 +116,9 @@ def enviar(titulo: str, mensagem: str, prioridade: int = 3):
             _rpc("argos_push_remover", {"p_chave": config.PUSH_CHAVE, "p_endpoints": expiradas})
         except Exception as e:
             log(f"Falha ao remover inscrições expiradas: {e}", "NOTIFICAÇÃO")
-    log(f"Web Push enviado para {enviados}/{len(destinos)} navegador(es)"
+    log(f"Web Push enviado para {enviados}/{len(destinos)} navegador(es)" + (f" da equipe {equipe}" if equipe else "")
         + (f", {len(expiradas)} inscrição(ões) expirada(s) removida(s)" if expiradas else "") + f": {titulo}", "NOTIFICAÇÃO")
+    return enviados
 
 
 def gerar_chaves():

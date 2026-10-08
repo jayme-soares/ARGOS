@@ -14,7 +14,7 @@ import contextlib
 import threading
 from datetime import datetime, timedelta
 
-from argos import config, publicador, saude
+from argos import avisos_equipe, config, publicador, saude
 from argos.alertas import PROGRAMAVEIS, formatar_duracao, linha_push, processar_alertas
 from argos.eorder.busca_tdc import exportar_religas_em_campo
 from argos.eorder.driver import abrir_driver, fechar_driver
@@ -360,6 +360,10 @@ class MonitorCampo(threading.Thread):
         )
         self._publicar()
         self._status("ok")
+        try:
+            avisos_equipe.avisar_designacoes(registros)
+        except Exception as e:
+            log(f"ERRO ao avisar designações às equipes: {e}", self.PREFIXO)
 
     def avaliar_alertas(self):
         agora = _agora()
@@ -371,9 +375,10 @@ class MonitorCampo(threading.Thread):
                 log(f"Dados de campo com {formatar_duracao(idade.total_seconds() / 60)} — alertas suspensos até a próxima exportação.", self.PREFIXO)
                 self._avisou_dados_velhos = True
             return
-        avisos = processar_alertas(self.registros, agora)
+        avisos = processar_alertas(self.registros, agora, ao_disparar=avisos_equipe.avisar_vencimentos)
         for aviso in avisos:
             log(f"Alerta: {aviso['titulo']}", self.PREFIXO)
+        avisos_equipe.reenviar_pendentes(self.registros, agora)
 
     def run(self):
         while True:

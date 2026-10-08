@@ -185,6 +185,13 @@ VAPID_CHAVE_PRIVADA = _env_str("ARGOS_VAPID_CHAVE_PRIVADA")
 # Contato exigido pelos serviços de push (Google/Apple/Mozilla) na assinatura.
 VAPID_CONTATO = _env_str("ARGOS_VAPID_CONTATO", "mailto:argos@example.com")
 
+# Avisos às equipes de campo (painel /equipe): religa designada, perto de
+# vencer e vencida, só para a equipe da ordem e com confirmação obrigatória.
+# Enquanto a equipe não confirmar, o push é reenviado a cada
+# REENVIO_AVISO_MINUTOS. Usa o mesmo Supabase/VAPID do Web Push.
+AVISOS_EQUIPE = _env_bool("ARGOS_AVISOS_EQUIPE", True)
+REENVIO_AVISO_MINUTOS = _env_int("ARGOS_REENVIO_AVISO_MIN", 10)
+
 # ------------------------------------------------------------------
 # PUBLICAÇÃO DO SNAPSHOT (Upstash Redis)
 # ------------------------------------------------------------------

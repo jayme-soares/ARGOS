@@ -81,6 +81,14 @@ def calcular_alertas(registros: list[dict], agora: datetime, estado: dict | None
                      categoria: Categoria = CAMPO, parcial: bool = False):
     """Retorna (avisos, novo_estado). Cada aviso é um dict com os argumentos
     de enviar_notificacao_push (titulo, mensagem, prioridade, tags)."""
+    avisos, novo_estado, _ = calcular_disparos(registros, agora, estado, antecedencias, categoria, parcial)
+    return avisos, novo_estado
+
+
+def calcular_disparos(registros: list[dict], agora: datetime, estado: dict | None, antecedencias=None,
+                      categoria: Categoria = CAMPO, parcial: bool = False):
+    """Como calcular_alertas, mais a lista de disparos por ordem
+    [(registro, nivel)] — usada para avisar cada equipe das próprias ordens."""
     def nome(n: int) -> str:
         return categoria.singular if n == 1 else categoria.plural
 
@@ -170,14 +178,17 @@ def calcular_alertas(registros: list[dict], agora: datetime, estado: dict | None
         "ultimo_lembrete": ultimo_lembrete.isoformat(timespec="seconds") if ultimo_lembrete else None,
         "avaliado_em": agora.isoformat(timespec="seconds"),
     }
-    return avisos, novo_estado
+    disparos = [(reg, nivel) for nivel, itens in disparar.items() for reg, _ in itens]
+    return avisos, novo_estado, disparos
 
 
 def processar_alertas(registros: list[dict], agora: datetime | None = None, categoria: Categoria = CAMPO,
-                      parcial: bool = False) -> list[dict]:
-    """registros: dicts com "tdc" e "vencimento" (ISO)."""
+                      parcial: bool = False, ao_disparar=None) -> list[dict]:
+    """registros: dicts com "tdc" e "vencimento" (ISO).
+    ao_disparar(disparos, agora): chamado depois dos pushes com os disparos
+    por ordem (avisos às equipes)."""
     agora = agora or datetime.now(config.TIMEZONE)
-    avisos, novo_estado = calcular_alertas(
+    avisos, novo_estado, disparos = calcular_disparos(
         registros, agora, carregar_json(categoria.arquivo_estado), categoria=categoria, parcial=parcial,
     )
     # Salva antes de enviar: se o processo cair no meio do envio, é melhor
@@ -185,4 +196,6 @@ def processar_alertas(registros: list[dict], agora: datetime | None = None, cate
     salvar_json(categoria.arquivo_estado, novo_estado)
     for aviso in avisos:
         enviar_notificacao_push(**aviso)
+    if ao_disparar and disparos:
+        ao_disparar(disparos, agora)
     return avisos
