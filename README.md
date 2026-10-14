@@ -1,6 +1,11 @@
 # ARGOS
 
-ARGOS é o painel único de acompanhamento das religações CENEGED Maricá no eOrder (Enel Rio).
+ARGOS é o painel único de acompanhamento das religações CENEGED no eOrder (Enel Rio), em dois contratos:
+
+- **SOC**: CO "Valtellina - Niterói", município de Maricá, equipes `NI2...`.
+- **Negociação**: os COs "Ceneged - X (CENEGED_X)": Angra, Araruama, Cabo Frio, Campos, Cantagalo, Itaperuna, Macaé, Niterói, Pádua, Petrópolis e R.Ostras. O "CENEGED - SOC MARICÁ" fica de fora dos dois.
+
+Cada contrato tem o próprio painel, os próprios pushes e as próprias contas de equipe. Ver [Contratos](#contratos).
 
 ```
 VPS Hostinger (Docker)                          Vercel
@@ -15,6 +20,8 @@ VPS Hostinger (Docker)                          Vercel
 ```
 
 ## O que o ARGOS faz
+
+Esta seção descreve a SOC. A Negociação segue as mesmas regras, com as diferenças listadas em [Contratos](#contratos).
 
 **Programáveis** (a cada 1 min):
 - Caminho no eOrder: Plano Diário → Atividades Programáveis → busca salva "CENEGED RELIGAÇÃO MARICA".
@@ -38,7 +45,7 @@ VPS Hostinger (Docker)                          Vercel
   - As em aberto alimentam a aba "Em campo" e os pushes de vencimento.
   - As finalizadas alimentam o indicador "Finalizadas hoje" (no prazo x fora do prazo), a aba "Finalizadas", a coluna da aba "Por equipe" e a aba "Finalizadas" do relatório Excel. Não geram push.
   - A hora de finalização é a maior `Data Fim` da aba `Linhas TdC` da planilha. Sem ela, vale a hora da primeira exportação em que a ordem apareceu finalizada.
-  - Para ver os estados que vêm na planilha: `python -m argos.planilha <arquivo>`. O comando lista a contagem por `Estado TdC` e como cada um foi classificado.
+  - Para ver os estados que vêm na planilha: `python -m argos.planilha <arquivo>` (Negociação: `--contrato negociacao`). O comando lista a contagem por `Estado TdC` e como cada um foi classificado.
 
 **Pushes de vencimento**, em duas categorias: ordens em campo (reavaliadas a cada 5 min) e programáveis (a cada checagem de 1 min):
 - 2h antes do vencimento
@@ -66,7 +73,8 @@ Cada equipe recebe só as próprias ordens, e cada aviso precisa ser confirmado 
 
 | Caminho | Conteúdo |
 |---|---|
-| `argos/main.py` | Entrada: sobe o health-check, o watchdog e os dois monitores |
+| `argos/main.py` | Entrada: sobe o health-check, o watchdog e os monitores dos contratos ligados |
+| `argos/contratos.py` | SOC e Negociação: COs, buscas salvas, filtros, chave do snapshot, pasta de estado |
 | `argos/workers.py` | Loops dos monitores: janela de horário, recuperação de falhas, modo sequencial |
 | `argos/eorder/` | Selenium: driver, login, Programáveis, Busca TdC/exportação |
 | `argos/planilha.py` | Leitura da planilha exportada. Detecta xlsx/xls/xlsb/HTML/XML pelo conteúdo |
@@ -77,7 +85,7 @@ Cada equipe recebe só as próprias ordens, e cada aviso precisa ser confirmado 
 | `web/` | Painel (Vercel). HTML/CSS/JS puro, sem build. `index.html` + `app.js` é o painel da gestão; `equipe.html` + `equipe.js` é o das equipes; `comum.js` é compartilhado |
 | `tests/` | Testes da planilha e dos alertas |
 
-O estado fica no volume `/data`: `programaveis.json`, `alertas.json` (em campo), `alertas_programaveis.json`, `designacoes.json` (equipe de cada ordem na última exportação), `snapshot.json`, `downloads/` e `debug/`, onde ficam os screenshots de erro. Por isso um restart do container não repete pushes.
+O estado fica no volume `/data`: `programaveis.json`, `alertas.json` (em campo), `alertas_programaveis.json`, `designacoes.json` (equipe de cada ordem na última exportação), `snapshot.json`, `downloads/` e `debug/`, onde ficam os screenshots de erro. Os arquivos da Negociação ficam em `/data/negociacao/`, com os mesmos nomes. Por isso um restart do container não repete pushes.
 
 ## Rodando localmente
 
@@ -127,7 +135,9 @@ O login usa o Supabase Auth da empresa (email e senha). Quem já tem conta entra
 
 - O **primeiro usuário** que entrar no painel vira administrador automaticamente.
 - Os demais ficam **aguardando aprovação** até um admin aprovar na aba **Acessos**, que só aparece para admins.
-- Admins podem aprovar, recusar, revogar e promover ou rebaixar outros admins. O último admin não pode ser removido.
+- Admins podem aprovar, recusar e revogar acessos. O último admin não pode ser removido.
+- **Administrador geral** (um só, definido na migração 004): é o único que libera os painéis de cada pessoa (SOC, Negociação ou os dois), pelos botões da coluna **Painéis** da aba Acessos, e o único que promove ou rebaixa admins. Ele vê os dois painéis sempre, e ninguém altera o acesso dele.
+- Quem é aprovado começa **sem painel** e vê "Aguardando liberação de contrato" até o administrador geral liberar. Quem tem os dois painéis alterna pelo seletor **SOC · Maricá | Negociação** no topo.
 
 Para configurar:
 
@@ -135,12 +145,51 @@ Para configurar:
 2. Entre no painel com a sua conta **antes de divulgar o link**, porque o primeiro login vira admin.
 3. Para o cadastro funcionar, em **Authentication → Sign In / Providers**, deixe ligado **Allow new users to sign up** (e o provedor Email).
 4. Se **Confirm email** estiver ligado, a pessoa recebe um link e só consegue entrar depois de confirmar. Nesse caso, em **Authentication → URL Configuration**, adicione o endereço do painel no Vercel em **Redirect URLs** (e, se quiser, como **Site URL**).
+5. Rode a [migração 004](#migração-004-contratos) para os contratos e o administrador geral.
+
+## Contratos
+
+| | SOC | Negociação |
+|---|---|---|
+| Programáveis | CO "Valtellina - Niterói", busca salva "CENEGED RELIGAÇÃO MARICA", só Maricá. Checagem a cada 1 min | Cada CO "Ceneged - X" com a própria busca salva (`ARGOS_NEG_PROGRAMAVEIS`). Um Chrome próprio percorre os COs em sequência, sem parar, e publica a cada volta completa |
+| Em campo | Busca TdC com o filtro salvo e o CO "Valtellina - Niterói". Só Maricá e `Código Equipe` `NI2...` | Mesmo filtro salvo, uma exportação por CO. Todas as equipes, identificadas pela coluna **`Equipe`** (o nome) |
+| Código no `/equipe` | `NI2...` | Derivado do nome: "Ceneged Angra 01" vira `CENEGED-ANGRA-01` |
+| Snapshot no Upstash | `ARGOS_SNAPSHOT_KEY` (`argos:snapshot`) | `<ARGOS_SNAPSHOT_KEY>:negociacao` |
+| Estado em `/data` | raiz | `negociacao/` |
+| ntfy | `NTFY_TOPIC` | `NTFY_TOPIC_NEGOCIACAO` |
+
+O monitor de campo é um só para os dois contratos. A cada ciclo ele pede uma exportação por CO (1 da SOC e 11 da Negociação) e depois baixa todas. Se um CO falhar, ficam os dados anteriores dele, o painel avisa quais COs ficaram sem dados novos, e os outros seguem normalmente. As programáveis da Negociação funcionam do mesmo jeito.
+
+Os pushes da gestão vão só para quem tem acesso ao contrato. Na Negociação, o título começa com "ARGOS Negociação ·". Tocar no push abre o painel já no contrato do aviso.
+
+### Ligar a Negociação
+
+1. **Descubra os COs e as buscas salvas** (de preferência num computador, com o Chrome visível):
+   ```powershell
+   $env:ARGOS_HEADLESS = "0"
+   python -m argos.eorder.descobrir
+   ```
+   O comando entra em cada CO "Ceneged - X" do Plano Diário. Ele lista as buscas salvas de Atividades Programáveis e os COs do combo da Busca TdC, e grava o resultado em `data/debug/descoberta.json`. Se faltar a busca de religa de algum CO, ela pode estar visível só para quem a criou. Nesse caso, peça para compartilhar a busca com o usuário do bot ou recriá-la com ele.
+2. No `.env` da VPS, preencha `ARGOS_NEG_PROGRAMAVEIS` com `value_do_CO:value_da_busca:nome` de cada CO, separados por `;` (por exemplo `140:52300:Angra;141:52301:Araruama`). Se os textos dos COs na Busca TdC forem diferentes do padrão, ajuste `ARGOS_NEG_COS_CAMPO`.
+3. Confira uma exportação: `python -m argos.eorder.busca_tdc --contrato negociacao --co "Ceneged - Angra (CENEGED_ANGRA)"`. O comando imprime as ordens lidas e as equipes pelo nome.
+4. Ligue com `ARGOS_NEGOCIACAO=1` e suba de novo (`docker compose up -d`).
+5. Crie as contas das equipes com `python -m argos.contas_equipes --contrato negociacao` (ver [Painel das equipes](#painel-das-equipes-de-campo)). A lista mostra o nome e o código de cada equipe. O código é o que a equipe digita no login.
+
+Com a Negociação ligada, a VPS roda 3 Chromes ao mesmo tempo: programáveis da SOC, programáveis da Negociação e a exportação de campo. Acompanhe a memória. Se o eOrder derrubar sessões simultâneas do mesmo usuário, use `ARGOS_MODO_SEQUENCIAL=1`.
+
+### Migração 004 (contratos)
+
+Ordem para atualizar uma instalação que hoje roda só a SOC:
+
+1. Abra [`supabase/migrations/004_argos_contratos.sql`](supabase/migrations/004_argos_contratos.sql) e troque `TROQUE-PELO-EMAIL-DO-ADMIN-GERAL` pelo e-mail com que o administrador geral entra no painel. Depois rode a migração no SQL Editor. Se o e-mail não estiver em `argos_acessos`, ela aborta sem mudar nada. Quem já estava aprovado fica com o painel da SOC, e as equipes existentes ficam na SOC.
+2. Faça o deploy do Vercel. O painel novo depende da 004.
+3. Atualize o bot na VPS (`git pull` + `docker compose up -d --build`). Até lá, o bot antigo continua funcionando com a 004, só para a SOC.
 
 ## Painel das equipes de campo
 
-Cada equipe (código `NI2...`) tem um acesso próprio em `/equipe` (por exemplo, `https://seu-projeto.vercel.app/equipe`). A tela foi feita para o celular.
+Cada equipe tem um acesso próprio em `/equipe` (por exemplo, `https://seu-projeto.vercel.app/equipe`), no contrato dela. Na SOC o código é o `NI2...`; na Negociação, o código derivado do nome (ver [Contratos](#contratos)). A tela foi feita para o celular.
 
-- **Login:** código da equipe e senha. No primeiro acesso, a equipe toca em "Primeiro acesso? Cadastre a equipe", cria a senha e fica aguardando aprovação de um admin na aba **Acessos**. Um código tem uma conta só, que pode estar aberta em vários celulares ao mesmo tempo.
+- **Login:** contrato (SOC ou Negociação), código da equipe e senha. No primeiro acesso, a equipe toca em "Primeiro acesso? Cadastre a equipe", cria a senha e fica aguardando aprovação de um admin na aba **Acessos**. Um código tem uma conta só, que pode estar aberta em vários celulares ao mesmo tempo.
 - **O que a equipe vê:** só as religas designadas para ela. As em aberto aparecem com contagem regressiva, cor de urgência, endereço e link para o mapa. As finalizadas (hoje ou nos últimos 7 dias) aparecem com "no prazo" ou "fora do prazo". O filtro por equipe é feito no servidor (`/api/snapshot`), então uma equipe nunca recebe dados de outra.
 - **Notificações:** a equipe ativa o sino (ou a faixa "Ative as notificações") em cada celular. Recebe só os avisos das próprias ordens, e nunca os da gestão. A gestão também não recebe os das equipes.
 - **Confirmação obrigatória:** cada aviso fica pendente até a equipe tocar em "Confirmo que visualizei". Enquanto houver pendentes, o painel fica bloqueado por esse aviso e o push é reenviado a cada `ARGOS_REENVIO_AVISO_MIN`. Se a ordem sai da equipe (foi finalizada ou redesignada), o aviso é dispensado.
@@ -157,7 +206,7 @@ Para configurar (uma vez):
 4. A VPS não precisa de variável nova. Basta atualizar o bot (`git pull` + `docker compose up -d --build`). Os avisos usam o mesmo Supabase e as mesmas chaves do Web Push.
 5. Teste: com uma equipe aprovada e o sino ativo no celular, rode na VPS `docker compose run --rm argos python -m argos.avisos_equipe --teste NI2XXXX`. O aviso de teste chega, bloqueia o painel da equipe até ela confirmar e aparece na aba **Avisos**.
 
-**Criar as contas de todas as equipes de uma vez** (em vez de cada equipe se cadastrar): na VPS, rode `docker compose run --rm -e SUPABASE_SERVICE_ROLE_KEY=<service_role> argos python -m argos.contas_equipes --senha '<senha inicial>'` para ver a lista e repita com `--confirmar` para criar. As equipes vêm do estado do bot (ordens em aberto, finalizadas recentes e designações). Códigos extras podem ir no fim do comando. As contas já nascem aprovadas e a equipe precisa trocar a senha no primeiro login (`--sem-troca` desliga isso). Equipes que já têm conta são puladas. Se `ARGOS_DOMINIO_EQUIPES` foi alterado no Vercel, passe o mesmo valor com `-e`.
+**Criar as contas de todas as equipes de uma vez** (em vez de cada equipe se cadastrar): na VPS, rode `docker compose run --rm -e SUPABASE_SERVICE_ROLE_KEY=<service_role> argos python -m argos.contas_equipes --senha '<senha inicial>'` para ver a lista e repita com `--confirmar` para criar. As equipes vêm do estado do bot (ordens em aberto, finalizadas recentes e designações). Códigos extras podem ir no fim do comando. As contas já nascem aprovadas e a equipe precisa trocar a senha no primeiro login (`--sem-troca` desliga isso). Equipes que já têm conta são puladas. Se `ARGOS_DOMINIO_EQUIPES` foi alterado no Vercel, passe o mesmo valor com `-e`. Para a Negociação, acrescente `--contrato negociacao`; os nomes extras no fim do comando viram código do mesmo jeito. O aviso de teste também aceita `--contrato negociacao`.
 
 Na primeira exportação depois da atualização, o bot só registra a equipe de cada ordem. Os avisos de designação começam na exportação seguinte, para que todas as ordens já abertas não cheguem como "novas".
 
@@ -210,10 +259,17 @@ Todas as opções estão comentadas em [`.env.example`](.env.example). As princi
 | `ARGOS_AVISOS_EQUIPE` | `1` | Avisos às equipes de campo (painel `/equipe`) |
 | `ARGOS_REENVIO_AVISO_MIN` | `10` | Reenvio do push enquanto a equipe não confirma o aviso |
 | `ARGOS_MODO_SEQUENCIAL` | `0` | `1` se o eOrder não aceitar duas sessões simultâneas do mesmo usuário |
+| `ARGOS_SOC_CO_CAMPO` | `Valtellina - Niterói` | CO da SOC no combo da Busca TdC |
+| `ARGOS_NEGOCIACAO` | `0` | Liga a Negociação |
+| `ARGOS_NEG_PROGRAMAVEIS` | vazio | `value_do_CO:value_da_busca:nome;...` das programáveis da Negociação |
+| `ARGOS_NEG_COS_CAMPO` | os 11 "Ceneged - X (CENEGED_X)" | COs da Negociação na Busca TdC, separados por `;` |
+| `NTFY_TOPIC_NEGOCIACAO` | vazio | Tópico ntfy da gestão da Negociação |
 
 ## Limitações conhecidas
 
-- Programáveis: só a primeira página da grade (~25 linhas) é lida. O total vem do título "Lista Atividades (N)", e o painel avisa quando há mais linhas do que as exibidas.
+- Programáveis da Negociação: cada volta passa por todos os COs, e cada troca de CO refaz a busca geral do Plano Diário. Por isso uma programável nova pode levar alguns minutos (o tempo de uma volta) para aparecer.
+- Busca TdC por CO: a troca de CO no combo ainda não foi testada no eOrder com a Negociação. Na primeira execução, confira com `python -m argos.eorder.busca_tdc --contrato negociacao` e o Chrome visível.
+- Programáveis: só a primeira página da grade (~25 linhas) é lida (por CO, na Negociação). O total vem do título "Lista Atividades (N)", e o painel avisa quando há mais linhas do que as exibidas.
 - Finalizadas: só aparecem as ordens com data de lançamento dentro da janela da Busca TdC (`ARGOS_CAMPO_DIAS_ATRAS`) e são atualizadas a cada exportação (30 min). Canceladas não contam como finalizadas, a menos que o estado esteja em `ARGOS_ESTADOS_FINALIZADOS`.
 - Avisos às equipes: as designações são vistas a cada exportação (30 min), então o aviso de religa designada pode chegar até 30 min depois da designação no eOrder. As notificações dependem de cada celular ter ativado o sino. No iPhone, o ARGOS precisa estar instalado na Tela de Início.
 - `ARGOS_DIAS_UTEIS_PRAZO` está em 2, que é temporário. A regra real é 1.
