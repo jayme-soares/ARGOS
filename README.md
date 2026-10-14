@@ -157,6 +157,8 @@ Para configurar (uma vez):
 4. A VPS não precisa de variável nova. Basta atualizar o bot (`git pull` + `docker compose up -d --build`). Os avisos usam o mesmo Supabase e as mesmas chaves do Web Push.
 5. Teste: com uma equipe aprovada e o sino ativo no celular, rode na VPS `docker compose run --rm argos python -m argos.avisos_equipe --teste NI2XXXX`. O aviso de teste chega, bloqueia o painel da equipe até ela confirmar e aparece na aba **Avisos**.
 
+**Criar as contas de todas as equipes de uma vez** (em vez de cada equipe se cadastrar): na VPS, rode `docker compose run --rm -e SUPABASE_SERVICE_ROLE_KEY=<service_role> argos python -m argos.contas_equipes --senha '<senha inicial>'` para ver a lista e repita com `--confirmar` para criar. As equipes vêm do estado do bot (ordens em aberto, finalizadas recentes e designações). Códigos extras podem ir no fim do comando. As contas já nascem aprovadas e a equipe precisa trocar a senha no primeiro login (`--sem-troca` desliga isso). Equipes que já têm conta são puladas. Se `ARGOS_DOMINIO_EQUIPES` foi alterado no Vercel, passe o mesmo valor com `-e`.
+
 Na primeira exportação depois da atualização, o bot só registra a equipe de cada ordem. Os avisos de designação começam na exportação seguinte, para que todas as ordens já abertas não cheguem como "novas".
 
 ## Painel no Vercel
