@@ -8,7 +8,7 @@ import re
 import time
 from datetime import datetime, timedelta
 
-from selenium.common.exceptions import StaleElementReferenceException
+from selenium.common.exceptions import InvalidElementStateException, StaleElementReferenceException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
@@ -102,27 +102,45 @@ def navegar_ate_atividades_programaveis(driver, co_value: str | None = None):
     time.sleep(1)
 
 
+def _digitar(driver, nome, texto, timeout=20):
+    """Limpa e preenche o campo visível `nome`, tentando de novo enquanto o
+    GWT ainda o recria ("not interactable" / stale)."""
+    fim = time.time() + timeout
+    while True:
+        try:
+            campo = encontrar_elemento_visivel(driver, By.NAME, nome, timeout=max(1, fim - time.time()))
+            campo.clear()
+            campo.send_keys(texto)
+            return
+        except (InvalidElementStateException, StaleElementReferenceException):
+            if time.time() >= fim:
+                raise
+            time.sleep(1)
+
+
 def preencher_busca(driver, prazo_final: datetime, busca_value: str | None = None):
     # Busca salva — encontrar_elemento_visivel porque o GWT mantém campos de
     # OUTRAS abas escondidos no DOM com o mesmo `name`.
     select_el = encontrar_elemento_visivel(driver, By.NAME, "_lyXWFMARSAID", timeout=config.WAIT_TIMEOUT)
     Select(select_el).select_by_value(busca_value or config.SAVED_SEARCH_VALUE)
 
-    # Expandir seção "Datas" caso esteja colapsada
+    # Selecionar a busca salva recarrega o formulário com os critérios dela;
+    # antes disso os campos aparecem mas não aceitam digitação.
+    time.sleep(3)
+
+    # "Prazo ANS Legal - A" (data e hora). A seção "Datas" abre e fecha a
+    # cada clique e cada busca salva guarda o próprio estado: só clica se o
+    # campo não estiver visível.
     try:
-        click_by_text(driver, "Datas", tag="div", timeout=3)
-        time.sleep(0.3)
+        encontrar_elemento_visivel(driver, By.NAME, "_dyDATASCADANSLEG_A", timeout=15)
     except Exception:
-        pass  # já pode estar expandida
-
-    # "Prazo ANS Legal - A" (data e hora)
-    data_field = encontrar_elemento_visivel(driver, By.NAME, "_dyDATASCADANSLEG_A", timeout=config.WAIT_TIMEOUT)
-    data_field.clear()
-    data_field.send_keys(prazo_final.strftime("%d/%m/%Y"))
-
-    hora_field = encontrar_elemento_visivel(driver, By.NAME, "_dyORASCADANSLEG_A", timeout=config.WAIT_TIMEOUT)
-    hora_field.clear()
-    hora_field.send_keys(prazo_final.strftime("%H:%M"))
+        try:
+            click_by_text(driver, "Datas", tag="div", timeout=5)
+            time.sleep(0.5)
+        except Exception:
+            debug_screenshot(driver, "prazo_ans_nao_visivel")
+    _digitar(driver, "_dyDATASCADANSLEG_A", prazo_final.strftime("%d/%m/%Y"))
+    _digitar(driver, "_dyORASCADANSLEG_A", prazo_final.strftime("%H:%M"))
 
     # O título "Lista Atividades (N)" da checagem ANTERIOR já pode estar na
     # tela. Guarda a referência antes de clicar em "Busca" para depois
