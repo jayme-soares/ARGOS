@@ -1,7 +1,9 @@
 """Avisos às equipes de campo, com confirmação obrigatória.
 
-Cada equipe (código NI2...) com conta aprovada no painel /equipe recebe
-push só das próprias ordens:
+Cada equipe com conta aprovada no painel /equipe recebe push só das
+próprias ordens. Na SOC a equipe é o código NI2...; na Negociação, o nome da
+coluna "Equipe" em forma de slug (ver contratos.slug_equipe). Contas, avisos
+e base de designações são separados por contrato.
 - "designada": a religa apareceu na exportação para a equipe (nova ou
   redesignada de outra equipe);
 - "vencer": a religa chegou a um dos níveis de ALERTAS_MINUTOS (os mesmos
@@ -19,13 +21,15 @@ são ignoradas sem erro.
 
 Teste manual (cria um aviso fictício e manda o push):
     python -m argos.avisos_equipe --teste NI201LRP-B
+    python -m argos.avisos_equipe --teste CENEGED-ANGRA-01 --contrato negociacao
 """
 
+import argparse
 import re
-import sys
 from datetime import datetime, timedelta
 
 from argos import config, webpush
+from argos.contratos import POR_ID, SOC, Contrato
 from argos.alertas import MAX_LINHAS_PUSH, MINUTOS_PRIORIDADE_MAXIMA, NIVEL_VENCIDA, formatar_duracao
 from argos.estado import carregar_json, salvar_json
 from argos.log import log
@@ -96,7 +100,7 @@ def _detalhe(reg: dict) -> str:
     return " · ".join(p for p in partes if p)
 
 
-def montar_avisos(itens: list[tuple[dict, str, str | None]]) -> tuple[list[dict], list[dict]]:
+def montar_avisos(itens: list[tuple[dict, str, str | None]], contrato: str = "soc") -> tuple[list[dict], list[dict]]:
     """itens: [(registro, tipo, nivel)].
 
     Retorna (linhas para argos_avisos_equipe, pushes). Um push por equipe e
@@ -108,6 +112,7 @@ def montar_avisos(itens: list[tuple[dict, str, str | None]]) -> tuple[list[dict]
         if not equipe or not reg.get("tdc"):
             continue
         linhas.append({
+            "contrato": contrato,
             "equipe": equipe,
             "tipo": tipo,
             "nivel": nivel,
@@ -192,10 +197,10 @@ def montar_lembrete(equipe: str, avisos: list[dict]) -> dict:
 # Envio (Supabase + Web Push). Nunca derruba o monitor: só loga.
 # ------------------------------------------------------------------
 
-def _enviar(itens: list[tuple[dict, str, str | None]]):
+def _enviar(itens: list[tuple[dict, str, str | None]], contrato: Contrato):
     if not itens or not habilitado():
         return
-    linhas, pushes = montar_avisos(itens)
+    linhas, pushes = montar_avisos(itens, contrato.id)
     if not linhas:
         return
     try:
@@ -206,32 +211,35 @@ def _enviar(itens: list[tuple[dict, str, str | None]]):
     com_conta = {normalizar_equipe(c.get("equipe")) for c in criados}
     for p in pushes:
         if p["equipe"] in com_conta:
-            webpush.enviar(p["titulo"], p["mensagem"], p["prioridade"], equipe=p["equipe"], tag=p["tag"])
+            webpush.enviar(p["titulo"], p["mensagem"], p["prioridade"], equipe=p["equipe"], tag=p["tag"], contrato=contrato)
     if criados:
-        log(f"{len(criados)} aviso(s) registrado(s) para {len(com_conta)} equipe(s): {', '.join(sorted(com_conta))}.", PREFIXO)
+        log(f"[{contrato.nome}] {len(criados)} aviso(s) registrado(s) para {len(com_conta)} equipe(s): "
+            f"{', '.join(sorted(com_conta))}.", PREFIXO)
 
 
-def avisar_designacoes(registros: list[dict]):
-    """Chamada a cada exportação, com as ordens em aberto."""
-    anteriores = carregar_json(ARQUIVO_DESIGNACOES)
+def avisar_designacoes(registros: list[dict], contrato: Contrato = SOC):
+    """Chamada a cada exportação, com as ordens em aberto do contrato."""
+    arquivo = contrato.arquivo(ARQUIVO_DESIGNACOES)
+    anteriores = carregar_json(arquivo)
     novas, base = detectar_designacoes(anteriores, registros)
-    salvar_json(ARQUIVO_DESIGNACOES, base)
+    salvar_json(arquivo, base)
     if anteriores is None:
-        log(f"Base de designações criada com {len(base)} ordem(ns); avisos de designação a partir da próxima exportação.", PREFIXO)
-    _enviar([(r, "designada", None) for r in novas])
+        log(f"[{contrato.nome}] Base de designações criada com {len(base)} ordem(ns); avisos de designação a partir "
+            "da próxima exportação.", PREFIXO)
+    _enviar([(r, "designada", None) for r in novas], contrato)
 
 
-def avisar_vencimentos(disparos: list[tuple[dict, str]], agora: datetime | None = None):
+def avisar_vencimentos(disparos: list[tuple[dict, str]], agora: datetime | None = None, contrato: Contrato = SOC):
     """Callback de alertas.processar_alertas: [(registro, nivel)]."""
-    _enviar([(reg, "vencida" if nivel == NIVEL_VENCIDA else "vencer", nivel) for reg, nivel in disparos])
+    _enviar([(reg, "vencida" if nivel == NIVEL_VENCIDA else "vencer", nivel) for reg, nivel in disparos], contrato)
 
 
-def reenviar_pendentes(registros: list[dict], agora: datetime):
+def reenviar_pendentes(registros: list[dict], agora: datetime, contrato: Contrato = SOC):
     """Chamada a cada reavaliação dos alertas (~5 min), sobre dados frescos."""
     if not habilitado():
         return
     try:
-        pendentes = webpush._rpc("argos_avisos_pendentes", {"p_chave": config.PUSH_CHAVE}) or []
+        pendentes = webpush._rpc("argos_avisos_pendentes", {"p_chave": config.PUSH_CHAVE, "p_contrato": contrato.id}) or []
     except Exception as e:
         log(f"Falha ao buscar avisos pendentes: {e}", PREFIXO)
         return
@@ -241,28 +249,30 @@ def reenviar_pendentes(registros: list[dict], agora: datetime):
     try:
         if dispensar:
             webpush._rpc("argos_avisos_dispensar", {"p_chave": config.PUSH_CHAVE, "p_ids": dispensar})
-            log(f"{len(dispensar)} aviso(s) dispensado(s): a ordem saiu da equipe.", PREFIXO)
+            log(f"[{contrato.nome}] {len(dispensar)} aviso(s) dispensado(s): a ordem saiu da equipe.", PREFIXO)
         for equipe, avisos in reenviar.items():
             p = montar_lembrete(equipe, avisos)
-            webpush.enviar(p["titulo"], p["mensagem"], p["prioridade"], equipe=equipe, tag=p["tag"])
+            webpush.enviar(p["titulo"], p["mensagem"], p["prioridade"], equipe=equipe, tag=p["tag"], contrato=contrato)
             webpush._rpc("argos_avisos_marcar_envio", {"p_chave": config.PUSH_CHAVE, "p_ids": [a["id"] for a in avisos]})
     except Exception as e:
         log(f"Falha ao processar avisos pendentes: {e}", PREFIXO)
 
 
-def _teste(equipe: str):
+def _teste(equipe: str, contrato: Contrato):
     if not habilitado():
         print("Push desativado ou incompleto (ARGOS_AVISOS_EQUIPE/ARGOS_PUSH/SUPABASE_*/ARGOS_PUSH_CHAVE/VAPID).")
         return
     agora = datetime.now(config.TIMEZONE)
     reg = {"tdc": TDC_TESTE, "ordem": TDC_TESTE, "equipe": equipe, "bairro": "Teste do ARGOS",
            "vencimento": (agora + timedelta(hours=1)).isoformat(timespec="minutes")}
-    _enviar([(reg, "designada", None)])
+    _enviar([(reg, "designada", None)], contrato)
     print("Aviso de teste enviado. Fica pendente (e é reenviado pelo bot) até a equipe confirmar no painel.")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and sys.argv[1] == "--teste":
-        _teste(normalizar_equipe(sys.argv[2]))
-    else:
-        print("Uso: python -m argos.avisos_equipe --teste <código da equipe>")
+    parser = argparse.ArgumentParser(description="Manda um aviso de teste para uma equipe.")
+    parser.add_argument("--teste", required=True, metavar="CODIGO", help="código da equipe (na Negociação, o slug do nome)")
+    parser.add_argument("--contrato", choices=sorted(POR_ID), default="soc")
+    args = parser.parse_args()
+    contrato_teste = POR_ID[args.contrato]
+    _teste(contrato_teste.chave_equipe(args.teste), contrato_teste)

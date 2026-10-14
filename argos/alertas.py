@@ -3,7 +3,8 @@
 - CAMPO: religas em campo (designadas a uma equipe NI2, ainda em aberto).
 - PROGRAMAVEIS: religações programáveis ainda não designadas.
 
-Cada categoria tem seu próprio arquivo de estado: uma ordem que passa de
+Cada categoria tem seu próprio arquivo de estado, separado por contrato
+(SOC no DATA_DIR raiz, Negociação em DATA_DIR/negociacao/): uma ordem que passa de
 programável para em campo começa os avisos de novo, agora como "em campo".
 
 Regras:
@@ -28,6 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from argos import config
+from argos.contratos import SOC, Contrato
 from argos.estado import carregar_json, salvar_json
 from argos.notificacao import enviar_notificacao_push
 
@@ -78,15 +80,15 @@ def _mensagem(itens: list[tuple[dict, datetime]], agora: datetime) -> str:
 
 
 def calcular_alertas(registros: list[dict], agora: datetime, estado: dict | None, antecedencias=None,
-                     categoria: Categoria = CAMPO, parcial: bool = False):
+                     categoria: Categoria = CAMPO, parcial: bool = False, marca: str = "ARGOS"):
     """Retorna (avisos, novo_estado). Cada aviso é um dict com os argumentos
     de enviar_notificacao_push (titulo, mensagem, prioridade, tags)."""
-    avisos, novo_estado, _ = calcular_disparos(registros, agora, estado, antecedencias, categoria, parcial)
+    avisos, novo_estado, _ = calcular_disparos(registros, agora, estado, antecedencias, categoria, parcial, marca)
     return avisos, novo_estado
 
 
 def calcular_disparos(registros: list[dict], agora: datetime, estado: dict | None, antecedencias=None,
-                      categoria: Categoria = CAMPO, parcial: bool = False):
+                      categoria: Categoria = CAMPO, parcial: bool = False, marca: str = "ARGOS"):
     """Como calcular_alertas, mais a lista de disparos por ordem
     [(registro, nivel)] — usada para avisar cada equipe das próprias ordens."""
     def nome(n: int) -> str:
@@ -144,7 +146,7 @@ def calcular_disparos(registros: list[dict], agora: datetime, estado: dict | Non
             continue
         urgente = a <= MINUTOS_PRIORIDADE_MAXIMA
         avisos.append({
-            "titulo": f"ARGOS · {len(itens)} {nome(len(itens))} {'vence' if len(itens) == 1 else 'vencem'} em até {formatar_duracao(a)}",
+            "titulo": f"{marca} · {len(itens)} {nome(len(itens))} {'vence' if len(itens) == 1 else 'vencem'} em até {formatar_duracao(a)}",
             "mensagem": _mensagem(itens, agora),
             "prioridade": 5 if urgente else 4,
             "tags": ["hourglass_flowing_sand"] if urgente else ["warning"],
@@ -153,7 +155,7 @@ def calcular_disparos(registros: list[dict], agora: datetime, estado: dict | Non
     itens_vencidos = disparar.get(NIVEL_VENCIDA)
     if itens_vencidos:
         avisos.append({
-            "titulo": f"ARGOS · {len(itens_vencidos)} {nome(len(itens_vencidos))} {'VENCEU' if len(itens_vencidos) == 1 else 'VENCERAM'} sem {categoria.vencida_sem}",
+            "titulo": f"{marca} · {len(itens_vencidos)} {nome(len(itens_vencidos))} {'VENCEU' if len(itens_vencidos) == 1 else 'VENCERAM'} sem {categoria.vencida_sem}",
             "mensagem": _mensagem(itens_vencidos, agora),
             "prioridade": 5,
             "tags": ["rotating_light"],
@@ -164,7 +166,7 @@ def calcular_disparos(registros: list[dict], agora: datetime, estado: dict | Non
     elif vencidas and categoria.lembrete_vencidas:
         if ultimo_lembrete is None or agora - ultimo_lembrete >= timedelta(minutes=config.LEMBRETE_VENCIDAS_MINUTOS):
             avisos.append({
-                "titulo": f"ARGOS · {len(vencidas)} {nome(len(vencidas))} {'vencida' if len(vencidas) == 1 else 'vencidas'} em aberto",
+                "titulo": f"{marca} · {len(vencidas)} {nome(len(vencidas))} {'vencida' if len(vencidas) == 1 else 'vencidas'} em aberto",
                 "mensagem": _mensagem(vencidas, agora),
                 "prioridade": 4,
                 "tags": ["alarm_clock"],
@@ -183,19 +185,20 @@ def calcular_disparos(registros: list[dict], agora: datetime, estado: dict | Non
 
 
 def processar_alertas(registros: list[dict], agora: datetime | None = None, categoria: Categoria = CAMPO,
-                      parcial: bool = False, ao_disparar=None) -> list[dict]:
+                      parcial: bool = False, ao_disparar=None, contrato: Contrato = SOC) -> list[dict]:
     """registros: dicts com "tdc" e "vencimento" (ISO).
     ao_disparar(disparos, agora): chamado depois dos pushes com os disparos
     por ordem (avisos às equipes)."""
     agora = agora or datetime.now(config.TIMEZONE)
+    arquivo = contrato.arquivo(categoria.arquivo_estado)
     avisos, novo_estado, disparos = calcular_disparos(
-        registros, agora, carregar_json(categoria.arquivo_estado), categoria=categoria, parcial=parcial,
+        registros, agora, carregar_json(arquivo), categoria=categoria, parcial=parcial, marca=contrato.marca,
     )
     # Salva antes de enviar: se o processo cair no meio do envio, é melhor
     # perder um push do que repetir todos no restart.
-    salvar_json(categoria.arquivo_estado, novo_estado)
+    salvar_json(arquivo, novo_estado)
     for aviso in avisos:
-        enviar_notificacao_push(**aviso)
+        enviar_notificacao_push(**aviso, contrato=contrato)
     if ao_disparar and disparos:
         ao_disparar(disparos, agora)
     return avisos

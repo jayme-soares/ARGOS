@@ -3,6 +3,7 @@
 import time
 
 from argos import config, publicador, saude
+from argos.contratos import ativos
 from argos.log import log
 from argos.workers import MonitorCampo, MonitorProgramaveis
 
@@ -15,14 +16,16 @@ def main():
     publicador.carregar_snapshot_local()
     saude.iniciar_servidor_saude()
 
-    monitores = [MonitorProgramaveis(), MonitorCampo()]
+    contratos = ativos()
+    monitores = [MonitorProgramaveis(c) for c in contratos if c.programaveis] + [MonitorCampo(contratos)]
     for m in monitores:
         saude.bater(m.NOME)
     saude.iniciar_watchdog()
     for m in monitores:
         m.start()
     log(
-        f"ARGOS iniciado (janela {config.HORARIO_INICIO}h-{config.HORARIO_FIM}h, "
+        f"ARGOS iniciado (contratos: {', '.join(c.nome for c in contratos)}; "
+        f"janela {config.HORARIO_INICIO}h-{config.HORARIO_FIM}h, "
         f"modo {'sequencial' if config.MODO_SEQUENCIAL else 'paralelo'}).",
     )
 

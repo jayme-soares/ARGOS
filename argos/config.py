@@ -119,6 +119,27 @@ ID_DATA_LANCAMENTO_FIM = _env_str("ARGOS_ID_DATA_LANC_FIM", "698247")
 EXPORTACAO_TIMEOUT_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_TIMEOUT_SEG", 15 * 60)
 EXPORTACAO_POLLING_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_POLLING_SEG", 30)
 
+# --- Contratos (ver argos/contratos.py) ---
+# CO da SOC no combo da Busca TdC (o filtro salvo traz todos os COs, mas a
+# tela exige escolher um por exportação).
+SOC_CO_CAMPO = _env_str("ARGOS_SOC_CO_CAMPO", "Valtellina - Niterói")
+# Negociação: os COs "Ceneged - X (CENEGED_X)". Desligada até as buscas
+# salvas de cada CO serem descobertas (python -m argos.eorder.descobrir).
+NEGOCIACAO = _env_bool("ARGOS_NEGOCIACAO", False)
+# Programáveis: "value_do_CO:value_da_busca_salva[:nome]" separados por ";".
+NEG_PROGRAMAVEIS = _env_str("ARGOS_NEG_PROGRAMAVEIS", "")
+# Busca TdC: texto exato dos COs no combo, separados por ";".
+NEG_COS_CAMPO = _env_str(
+    "ARGOS_NEG_COS_CAMPO",
+    ";".join(f"Ceneged - {n} (CENEGED_{s})" for n, s in (
+        ("Angra", "ANGRA"), ("Araruama", "ARARUAMA"), ("Cabo Frio", "CABO_FRIO"), ("Campos", "CAMPOS"),
+        ("Cantagalo", "CANTAGALO"), ("Itaperuna", "ITAPERUNA"), ("Macaé", "MACAE"), ("Niterói", "NITEROI"),
+        ("Pádua", "PADUA"), ("Petrópolis", "PETROPOLIS"), ("R.Ostras", "RIO_OSTRAS"),
+    )),
+)
+# Tópico ntfy da gestão da Negociação (sem ele, só o Web Push do painel).
+NTFY_TOPIC_NEGOCIACAO = _env_str("NTFY_TOPIC_NEGOCIACAO")
+
 # --- Alertas de vencimento ---
 # Antecedências (em minutos) dos avisos de "vai vencer", para as ordens em
 # campo e para as programáveis. Cada ordem recebe cada aviso uma única vez.
@@ -216,6 +237,8 @@ def validar_config():
         avisos.append("NTFY_TOPIC não definido — notificações push desativadas.")
     if HABILITAR_NOTIFICACAO_PUSH and not (SUPABASE_URL and SUPABASE_ANON_KEY and PUSH_CHAVE and VAPID_CHAVE_PRIVADA):
         avisos.append("SUPABASE_URL/SUPABASE_ANON_KEY/ARGOS_PUSH_CHAVE/ARGOS_VAPID_CHAVE_PRIVADA incompletos — notificações pelo painel desativadas.")
+    if NEGOCIACAO and not NEG_PROGRAMAVEIS:
+        avisos.append("ARGOS_NEGOCIACAO ligado sem ARGOS_NEG_PROGRAMAVEIS — as programáveis da Negociação ficam paradas.")
     if not (UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN):
         avisos.append("UPSTASH_REDIS_REST_URL/TOKEN não definidos — o painel não vai receber dados.")
     return avisos

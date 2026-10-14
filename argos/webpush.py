@@ -68,24 +68,35 @@ def url_painel(caminho: str = "") -> str:
     return f"{base}/{caminho}" if base else f"/{caminho}"
 
 
-def enviar(titulo: str, mensagem: str, prioridade: int = 3, equipe: str | None = None, tag: str | None = None) -> int:
-    """Sem `equipe`: para a gestão (todos os aprovados que não são equipe).
-    Com `equipe`: só para os aparelhos da conta daquela equipe, abrindo o
-    painel /equipe. `tag` faz o aviso novo substituir o anterior de mesma tag.
+def url_painel_gestao(contrato) -> str:
+    """Tocar no push abre o painel já no contrato do aviso."""
+    return url_painel(f"?contrato={contrato.id}")
+
+
+def enviar(titulo: str, mensagem: str, prioridade: int = 3, equipe: str | None = None, tag: str | None = None,
+           contrato=None) -> int:
+    """Sem `equipe`: para a gestão do contrato (aprovados com acesso a ele,
+    exceto equipes). Com `equipe`: só para os aparelhos da conta daquela
+    equipe do contrato, abrindo o painel /equipe. `tag` faz o aviso novo
+    substituir o anterior de mesma tag.
     Nunca derruba o loop: falhas só vão para o log. Devolve quantos enviou."""
     from pywebpush import WebPushException, webpush
 
+    from argos.contratos import SOC
+
+    contrato = contrato or SOC
     try:
         if equipe:
-            destinos = _rpc("argos_push_destinos_equipe", {"p_chave": config.PUSH_CHAVE, "p_equipe": equipe}) or []
+            destinos = _rpc("argos_push_destinos_equipe",
+                            {"p_chave": config.PUSH_CHAVE, "p_contrato": contrato.id, "p_equipe": equipe}) or []
         else:
-            destinos = _rpc("argos_push_destinos", {"p_chave": config.PUSH_CHAVE}) or []
+            destinos = _rpc("argos_push_destinos", {"p_chave": config.PUSH_CHAVE, "p_contrato": contrato.id}) or []
     except Exception as e:
         log(f"Falha ao buscar inscrições do painel: {e}", "NOTIFICAÇÃO")
         return 0
 
     dados = {"titulo": titulo, "mensagem": mensagem, "prioridade": prioridade,
-             "url": url_painel("equipe") if equipe else (config.PAINEL_URL or "/")}
+             "url": url_painel("equipe") if equipe else url_painel_gestao(contrato)}
     if tag:
         dados["tag"] = tag
     payload = json.dumps(dados)
@@ -116,7 +127,7 @@ def enviar(titulo: str, mensagem: str, prioridade: int = 3, equipe: str | None =
             _rpc("argos_push_remover", {"p_chave": config.PUSH_CHAVE, "p_endpoints": expiradas})
         except Exception as e:
             log(f"Falha ao remover inscrições expiradas: {e}", "NOTIFICAÇÃO")
-    log(f"Web Push enviado para {enviados}/{len(destinos)} navegador(es)" + (f" da equipe {equipe}" if equipe else "")
+    log(f"Web Push enviado para {enviados}/{len(destinos)} navegador(es)" + (f" da equipe {equipe}" if equipe else "") + f" [{contrato.nome}]"
         + (f", {len(expiradas)} inscrição(ões) expirada(s) removida(s)" if expiradas else "") + f": {titulo}", "NOTIFICAÇÃO")
     return enviados
 

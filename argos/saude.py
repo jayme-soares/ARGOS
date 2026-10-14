@@ -13,11 +13,15 @@ _lock = threading.Lock()
 _ultimo_progresso: dict[str, float] = {}
 
 
-def atualizar_status(worker: str, estado: str):
+def atualizar_status(worker: str, estado: str, chave: str | None = None, contratos=None):
     """Registra progresso do monitor (alimenta o watchdog) e o estado que
-    aparece no painel."""
+    aparece no painel dos `contratos`, sob `chave` (padrão: o nome do
+    monitor)."""
     bater(worker)
-    publicador.atualizar_status(worker, estado)
+    if contratos is None:
+        publicador.atualizar_status(chave or worker, estado)
+    else:
+        publicador.atualizar_status(chave or worker, estado, contratos)
 
 
 def bater(worker: str):

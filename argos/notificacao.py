@@ -7,11 +7,14 @@
 import requests
 
 from argos import config, webpush
+from argos.contratos import SOC, Contrato
 from argos.log import log
 
 
-def enviar_notificacao_push(titulo, mensagem, prioridade=3, tags=None):
+def enviar_notificacao_push(titulo, mensagem, prioridade=3, tags=None, contrato: Contrato = SOC):
     """Nunca derruba o loop por falha de rede/serviço: só registra o erro.
+    Vai para a gestão do `contrato`: o tópico ntfy dele e quem tem acesso a
+    ele no painel.
 
     prioridade: 1 (mín.) a 5 (máx.) — https://docs.ntfy.sh/publish/#message-priority
     tags: emoji shortcodes do ntfy (ex.: ["rotating_light"]) — https://docs.ntfy.sh/publish/#tags-emojis
@@ -20,22 +23,22 @@ def enviar_notificacao_push(titulo, mensagem, prioridade=3, tags=None):
         log(f"(push desativado) {titulo}: {mensagem}", "NOTIFICAÇÃO")
         return
     if webpush.habilitado():
-        webpush.enviar(titulo, mensagem, prioridade)
-    _enviar_ntfy(titulo, mensagem, prioridade, tags)
+        webpush.enviar(titulo, mensagem, prioridade, contrato=contrato)
+    _enviar_ntfy(titulo, mensagem, prioridade, tags, contrato)
 
 
-def _enviar_ntfy(titulo, mensagem, prioridade, tags):
-    if not config.NTFY_TOPIC:
+def _enviar_ntfy(titulo, mensagem, prioridade, tags, contrato):
+    if not contrato.ntfy_topic:
         return
     payload = {
-        "topic": config.NTFY_TOPIC,
+        "topic": contrato.ntfy_topic,
         "title": titulo,
         "message": mensagem,
         "priority": prioridade,
         "tags": tags or [],
     }
     if config.PAINEL_URL:
-        payload["click"] = config.PAINEL_URL
+        payload["click"] = webpush.url_painel_gestao(contrato)
     try:
         resp = requests.post(config.NTFY_SERVER, json=payload, timeout=10)
         resp.raise_for_status()

@@ -5,12 +5,12 @@ xlsx, xls binário, xlsb, HTML ou SpreadsheetML (XML) com extensão .xls, ou
 compactado em zip. Por isso o formato é detectado pelo conteúdo, não pela
 extensão.
 
-Uso avulso:  python -m argos.planilha caminho/da/planilha.xls
+Uso avulso:  python -m argos.planilha caminho/da/planilha.xls [--contrato negociacao]
 """
 
+import argparse
 import io
 import re
-import sys
 import warnings
 import zipfile
 from datetime import datetime, timedelta
@@ -24,6 +24,7 @@ from openpyxl import load_workbook
 warnings.filterwarnings("ignore", message="Workbook contains no default style")
 
 from argos import config
+from argos.contratos import POR_ID, SOC, Contrato
 from argos.eorder.ui import normalizar_texto
 
 ABA_PREFERIDA = "TdC"
@@ -34,8 +35,9 @@ COLUNAS = {
     "ordem": "Numero de Serviço",
     "tdc": "Código TdC",
     "cliente": "Código Cliente",
-    # "Código Equipe" em vez de "Equipe": na coluna Equipe o eOrder às vezes
-    # traz o nome do responsável no lugar do código da equipe.
+    # Na SOC, "Código Equipe" em vez de "Equipe": na coluna Equipe o eOrder
+    # às vezes traz o nome do responsável no lugar do código da equipe. A
+    # Negociação usa justamente o nome ("Equipe"). Ver Contrato.coluna_equipe.
     "equipe": "Código Equipe",
     "municipio": "Município",
     "bairro": "Bairro",
@@ -195,7 +197,7 @@ def _escolher_aba(abas: dict[str, pd.DataFrame]) -> pd.DataFrame:
     )
 
 
-def _mapear_colunas(df: pd.DataFrame) -> dict[str, str]:
+def _mapear_colunas(df: pd.DataFrame, contrato: Contrato = SOC) -> dict[str, str]:
     """campo do ARGOS -> nome real da coluna no DataFrame. Se a mesma
     coluna aparecer duplicada (ex.: 'Equipe' em duas seções), fica a primeira."""
     por_normalizado = {}
@@ -203,7 +205,7 @@ def _mapear_colunas(df: pd.DataFrame) -> dict[str, str]:
         por_normalizado.setdefault(normalizar_texto(col), col)
 
     mapa, faltando = {}, []
-    for campo, nome in COLUNAS.items():
+    for campo, nome in {**COLUNAS, "equipe": contrato.coluna_equipe}.items():
         real = por_normalizado.get(normalizar_texto(nome))
         if real is None:
             faltando.append(nome)
@@ -273,12 +275,14 @@ def converter_data(valor) -> datetime | None:
 # API
 # ------------------------------------------------------------------
 
-def _pertence_ao_escopo(municipio: str, equipe: str) -> bool:
-    """Só o município e as equipes da CENEGED (ver config.MUNICIPIO_CAMPO e
-    config.PREFIXO_EQUIPE_CAMPO). Ordem sem equipe fica de fora."""
-    if normalizar_texto(municipio) != normalizar_texto(config.MUNICIPIO_CAMPO):
+def _pertence_ao_escopo(municipio: str, equipe: str, contrato: Contrato = SOC) -> bool:
+    """Só o município e as equipes do contrato (SOC: Maricá e NI2...; a
+    Negociação não filtra nenhum dos dois). Ordem sem equipe fica de fora."""
+    if not equipe:
         return False
-    return equipe.upper().startswith(config.PREFIXO_EQUIPE_CAMPO.upper())
+    if contrato.municipio_campo and normalizar_texto(municipio) != normalizar_texto(contrato.municipio_campo):
+        return False
+    return not contrato.prefixo_equipe or equipe.upper().startswith(contrato.prefixo_equipe.upper())
 
 
 def _eh_finalizada(estado_tdc: str) -> bool:
@@ -318,7 +322,7 @@ def _ler_fim_por_tdc(abas: dict[str, pd.DataFrame]) -> dict[str, dict]:
     return fins
 
 
-def ler_exportacao_campo(caminho: Path | str) -> dict:
+def ler_exportacao_campo(caminho: Path | str, contrato: Contrato = SOC, co: str | None = None) -> dict:
     """Separa as ordens do município/equipes do escopo em abertas e
     finalizadas (pelo "Estado TdC", ver config.ESTADOS_FINALIZADOS),
     deduplicadas por TdC.
@@ -330,11 +334,15 @@ def ler_exportacao_campo(caminho: Path | str) -> dict:
     - estados: contagem de TdCs por "Estado TdC" na planilha inteira, antes
       do filtro de escopo (para descobrir os nomes dos estados).
 
+    Na Negociação, `equipe` vira o slug do nome (chave da conta /equipe e dos
+    avisos) e o nome original fica em `equipe_nome`. Com `co`, cada registro
+    leva o Centro Operativo da exportação.
+
     Datas saem em ISO 8601 com fuso, prontas para o JSON do painel."""
     caminho = Path(caminho)
     abas = _ler_bruto(caminho.read_bytes(), caminho.name)
     df = _escolher_aba(abas)
-    mapa = _mapear_colunas(df)
+    mapa = _mapear_colunas(df, contrato)
 
     vistos: set[str] = set()
     estados: dict[str, int] = {}
@@ -348,11 +356,16 @@ def ler_exportacao_campo(caminho: Path | str) -> dict:
         vistos.add(tdc)
         estado_tdc = _texto(linha[mapa["estado_tdc"]]) if "estado_tdc" in mapa else ""
         estados[estado_tdc] = estados.get(estado_tdc, 0) + 1
-        if not _pertence_ao_escopo(_texto(linha[mapa["municipio"]]), _texto(linha[mapa["equipe"]])):
+        if not _pertence_ao_escopo(_texto(linha[mapa["municipio"]]), _texto(linha[mapa["equipe"]]), contrato):
             continue
         venc = converter_data(linha[mapa["vencimento"]])
         registro = {campo: _texto(linha[col]) for campo, col in mapa.items() if campo != "vencimento"}
         registro["vencimento"] = venc.isoformat(timespec="minutes") if venc else None
+        if contrato.equipe_por_nome:
+            registro["equipe_nome"] = registro["equipe"]
+            registro["equipe"] = contrato.chave_equipe(registro["equipe"])
+        if co:
+            registro["co"] = co
         if not _eh_finalizada(estado_tdc):
             em_aberto.append(registro)
             continue
@@ -408,7 +421,8 @@ def imprimir_exportacao(dados: dict):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Uso: python -m argos.planilha caminho/da/planilha")
-        sys.exit(1)
-    imprimir_exportacao(ler_exportacao_campo(sys.argv[1]))
+    parser = argparse.ArgumentParser(description="Lê uma planilha exportada da Busca TdC.")
+    parser.add_argument("arquivo")
+    parser.add_argument("--contrato", choices=sorted(POR_ID), default="soc")
+    args = parser.parse_args()
+    imprimir_exportacao(ler_exportacao_campo(args.arquivo, POR_ID[args.contrato]))

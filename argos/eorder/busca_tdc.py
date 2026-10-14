@@ -1,5 +1,10 @@
 """Lista TdC > Busca TdC > filtro salvo "PARCIAL RELIGA CENEGED - MARICÁ" >
-Exportar em xls > Lista de exportação > download da planilha.
+Centro Operativo > Exportar em xls > Lista de exportação > download.
+
+O filtro salvo cobre todos os COs, mas a tela exige escolher um por busca:
+por ciclo sai uma exportação por CO (SOC: "Valtellina - Niterói";
+Negociação: cada "Ceneged - X"). Todas são pedidas primeiro e baixadas
+depois, porque o eOrder gera os arquivos de forma assíncrona.
 
 Portado de Producao SOC/modules/eorder_interact.py (export_data e
 download_file), com estas correções:
@@ -12,8 +17,10 @@ download_file), com estas correções:
   texto/atributo.
 
 Uso avulso (descoberta/diagnóstico, de preferência com ARGOS_HEADLESS=0):
-    python -m argos.eorder.busca_tdc              # exporta, baixa e imprime a tabela
-    python -m argos.eorder.busca_tdc --arquivo X  # só lê uma planilha já baixada
+    python -m argos.eorder.busca_tdc                          # SOC: exporta, baixa e imprime
+    python -m argos.eorder.busca_tdc --contrato negociacao    # todos os COs da Negociação
+    python -m argos.eorder.busca_tdc --contrato negociacao --co "Ceneged - Angra (CENEGED_ANGRA)"
+    python -m argos.eorder.busca_tdc --arquivo X              # só lê uma planilha já baixada
 """
 
 import time
@@ -278,6 +285,18 @@ def solicitar_exportacao(driver, nome_exportacao: str, timeout=180):
     _esc(driver)
 
 
+def selecionar_co(driver, co_nome: str):
+    """Combo Centro Operativo da Busca TdC (o filtro salvo deixa o
+    "Valtellina - Niterói" selecionado)."""
+    try:
+        selecionar_opcao_por_texto(driver, co_nome, timeout=30)
+        # O GWT pode recarregar o formulário ao trocar o CO.
+        time.sleep(3)
+    except Exception:
+        debug_screenshot(driver, "co_busca_tdc_nao_encontrado")
+        raise
+
+
 def abrir_lista_exportacao(driver):
     try:
         esperar_e_clicar_visivel(driver, XPATH_LISTA_EXPORTACAO, timeout=45, via_js=True)
@@ -369,52 +388,97 @@ def baixar_exportacao(driver, nome_exportacao: str, progresso=_nada) -> Path:
     )
 
 
-def exportar_religas_em_campo(driver, progresso=_nada) -> Path:
-    """Fluxo completo, com o driver já logado. Retorna o caminho da planilha
-    baixada. `progresso(etapa)` é chamado a cada etapa (alimenta o watchdog
-    e o status do painel)."""
-    agora = datetime.now(config.TIMEZONE)
-    nome_exportacao = f"argos_campo_{agora:%Y%m%d_%H%M%S}"
-    inicio = agora - timedelta(days=config.CAMPO_DIAS_ATRAS)
-
-    limpar_downloads()
-
+def _solicitar_exportacao_do_co(driver, co_nome: str | None, nome_exportacao: str, inicio: datetime,
+                                fim: datetime, progresso=_nada):
     progresso("abrindo_busca_tdc")
     abrir_busca_tdc(driver)
     progresso("selecionando_filtro")
     selecionar_filtro(driver, config.FILTRO_CAMPO)
-    preencher_data_lancamento(driver, inicio, agora)
+    if co_nome:
+        selecionar_co(driver, co_nome)
+    preencher_data_lancamento(driver, inicio, fim)
     progresso("buscando")
     buscar(driver)
     progresso("solicitando_exportacao")
     solicitar_exportacao(driver, nome_exportacao)
-    log(f"Exportação '{nome_exportacao}' solicitada.", PREFIXO_LOG)
-    abrir_lista_exportacao(driver)
-    arquivo = baixar_exportacao(driver, nome_exportacao, progresso=progresso)
-    log(f"Planilha baixada: {arquivo.name} ({arquivo.stat().st_size} bytes)", PREFIXO_LOG)
-    return arquivo
+
+
+def exportar_cos(driver, cos: list[str], progresso=_nada) -> dict[str, Path | Exception]:
+    """Pede uma exportação por CO e depois baixa todas. Com o driver já
+    logado. Retorna {co: planilha baixada ou a exceção daquele CO}: um CO
+    que falha não derruba os outros. `progresso(etapa)` é chamado a cada
+    etapa (alimenta o watchdog e o status do painel)."""
+    from argos.eorder.sessao import login
+
+    agora = datetime.now(config.TIMEZONE)
+    inicio = agora - timedelta(days=config.CAMPO_DIAS_ATRAS)
+    limpar_downloads()
+
+    resultado: dict[str, Path | Exception] = {}
+    nomes: dict[str, str] = {}
+    for i, co in enumerate(cos):
+        nome = f"argos_campo_{agora:%Y%m%d_%H%M%S}_{i:02d}"
+        try:
+            _solicitar_exportacao_do_co(driver, co, nome, inicio, agora, progresso)
+            nomes[co] = nome
+            log(f"Exportação '{nome}' ({co}) solicitada.", PREFIXO_LOG)
+        except Exception as e:
+            resultado[co] = e
+            log(f"ERRO ao pedir a exportação de {co}: {str(e).splitlines()[0]}", PREFIXO_LOG)
+            # Recomeça do Menu Principal para o próximo CO não herdar a tela
+            # quebrada. Ainda não há planilha baixada para o login apagar.
+            try:
+                login(driver)
+            except Exception as e_login:
+                log(f"Relogin após a falha também falhou: {e_login}", PREFIXO_LOG)
+                for resto in cos[i + 1:]:
+                    resultado[resto] = e_login
+                break
+
+    if nomes:
+        abrir_lista_exportacao(driver)
+    for co, nome in nomes.items():
+        try:
+            arquivo = baixar_exportacao(driver, nome, progresso=progresso)
+            log(f"Planilha de {co} baixada: {arquivo.name} ({arquivo.stat().st_size} bytes)", PREFIXO_LOG)
+            resultado[co] = arquivo
+        except Exception as e:
+            resultado[co] = e
+            log(f"ERRO ao baixar a exportação de {co}: {str(e).splitlines()[0]}", PREFIXO_LOG)
+    return resultado
 
 
 if __name__ == "__main__":
     import argparse
 
+    from argos.contratos import POR_ID
     from argos.eorder.driver import abrir_driver, fechar_driver
     from argos.eorder.sessao import login
     from argos.planilha import imprimir_exportacao, ler_exportacao_campo
 
     parser = argparse.ArgumentParser(description="Exporta e lê a planilha de religas em campo.")
     parser.add_argument("--arquivo", help="Só lê uma planilha já baixada, sem abrir o eOrder.")
+    parser.add_argument("--contrato", choices=sorted(POR_ID), default="soc")
+    parser.add_argument("--co", action="append", help="Só este(s) CO(s), pelo texto do combo.")
     args = parser.parse_args()
+    contrato = POR_ID[args.contrato]
 
     if args.arquivo:
-        caminho = Path(args.arquivo)
+        planilhas = {None: Path(args.arquivo)}
     else:
         config.validar_config()
         drv = abrir_driver(pasta_download=config.DOWNLOAD_DIR)
         try:
             login(drv)
-            caminho = exportar_religas_em_campo(drv, progresso=lambda etapa: log(etapa, PREFIXO_LOG))
+            planilhas = exportar_cos(drv, args.co or list(contrato.cos_campo),
+                                     progresso=lambda etapa: log(etapa, PREFIXO_LOG))
         finally:
             fechar_driver(drv)
 
-    imprimir_exportacao(ler_exportacao_campo(caminho))
+    for co, caminho in planilhas.items():
+        print()
+        print(f"===== {co or caminho} =====")
+        if isinstance(caminho, Exception):
+            print(f"FALHOU: {caminho}")
+        else:
+            imprimir_exportacao(ler_exportacao_campo(caminho, contrato, co))
