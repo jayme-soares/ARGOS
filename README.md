@@ -3,7 +3,7 @@
 ARGOS é o painel único de acompanhamento das religações CENEGED no eOrder (Enel Rio), em dois contratos:
 
 - **SOC**: CO "Valtellina - Niterói", município de Maricá, equipes `NI2...`.
-- **Negociação**: os COs "Ceneged - X (CENEGED_X)": Angra, Araruama, Cabo Frio, Campos, Cantagalo, Itaperuna, Macaé, Niterói, Pádua e R.Ostras (Petrópolis não aparece para o usuário do bot). O "CENEGED - SOC MARICÁ" fica de fora dos dois.
+- **Negociação**: os COs "Ceneged - X (CENEGED_X)": Angra, Araruama, Cabo Frio, Campos, Cantagalo, Itaperuna, Macaé, Niterói, Pádua, Petrópolis e R.Ostras. O "CENEGED - SOC MARICÁ" fica de fora dos dois.
 
 Cada contrato tem o próprio painel, os próprios pushes e as próprias contas de equipe. Ver [Contratos](#contratos).
 
@@ -158,7 +158,7 @@ Para configurar:
 | Estado em `/data` | raiz | `negociacao/` |
 | ntfy | `NTFY_TOPIC` | `NTFY_TOPIC_NEGOCIACAO` |
 
-O monitor de campo é um só para os dois contratos. A cada ciclo ele pede uma exportação por CO (1 da SOC e 10 da Negociação) e depois baixa todas. Se um CO falhar, ficam os dados anteriores dele, o painel avisa quais COs ficaram sem dados novos, e os outros seguem normalmente. As programáveis da Negociação funcionam do mesmo jeito.
+O monitor de campo é um só para os dois contratos. A cada ciclo ele pede uma exportação por CO (1 da SOC e 11 da Negociação) e depois baixa todas. Se um CO falhar, ficam os dados anteriores dele, o painel avisa quais COs ficaram sem dados novos, e os outros seguem normalmente. As programáveis da Negociação funcionam do mesmo jeito.
 
 Os pushes da gestão vão só para quem tem acesso ao contrato. Na Negociação, o título começa com "ARGOS Negociação ·". Tocar no push abre o painel já no contrato do aviso.
 
@@ -262,7 +262,7 @@ Todas as opções estão comentadas em [`.env.example`](.env.example). As princi
 | `ARGOS_SOC_CO_CAMPO` | `Valtellina - Niterói` | CO da SOC no combo da Busca TdC |
 | `ARGOS_NEGOCIACAO` | `0` | Liga a Negociação |
 | `ARGOS_NEG_PROGRAMAVEIS` | vazio | `value_do_CO:value_da_busca:nome;...` das programáveis da Negociação |
-| `ARGOS_NEG_COS_CAMPO` | os 10 "Ceneged - X (CENEGED_X)" | COs da Negociação na Busca TdC, separados por `;` |
+| `ARGOS_NEG_COS_CAMPO` | os 11 "Ceneged - X" | COs da Negociação na Busca TdC, separados por `;` |
 | `NTFY_TOPIC_NEGOCIACAO` | vazio | Tópico ntfy da gestão da Negociação |
 
 ## Limitações conhecidas

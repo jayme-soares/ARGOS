@@ -129,14 +129,15 @@ NEGOCIACAO = _env_bool("ARGOS_NEGOCIACAO", False)
 # Programáveis: "value_do_CO:value_da_busca_salva[:nome]" separados por ";".
 NEG_PROGRAMAVEIS = _env_str("ARGOS_NEG_PROGRAMAVEIS", "")
 # Busca TdC: texto exato dos COs no combo, separados por ";". O padrão são os
-# 10 que a descoberta encontrou (Petrópolis não aparece para o usuário do bot).
+# 11 que a descoberta encontrou. O de Petrópolis vem cortado no eOrder, sem o
+# ")" final.
 NEG_COS_CAMPO = _env_str(
     "ARGOS_NEG_COS_CAMPO",
     ";".join(f"Ceneged - {n} (CENEGED_{s})" for n, s in (
         ("Angra", "ANGRA"), ("Araruama", "ARARUAMA"), ("Cabo Frio", "CABO_FRIO"), ("Campos", "CAMPOS"),
         ("Cantagalo", "CANTAGALO"), ("Itaperuna", "ITAPERUNA"), ("Macaé", "MACAE"), ("Niterói", "NITEROI"),
         ("Pádua", "PADUA"), ("R.Ostras", "RIO_OSTRAS"),
-    )),
+    )) + ";Ceneged - Petrópolis (CENEGED_PETROPOLIS",
 )
 # Tópico ntfy da gestão da Negociação (sem ele, só o Web Push do painel).
 NTFY_TOPIC_NEGOCIACAO = _env_str("NTFY_TOPIC_NEGOCIACAO")

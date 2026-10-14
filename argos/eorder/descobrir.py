@@ -32,8 +32,9 @@ from argos.eorder.ui import debug_screenshot, encontrar_elemento_visivel, normal
 from argos.log import log
 
 PREFIXO_LOG = "DESCOBERTA"
-# "Ceneged - Angra (CENEGED_ANGRA)". O "CENEGED - SOC MARICÁ" (sem sigla) fica de fora.
-PADRAO_CO_NEGOCIACAO = re.compile(r"^ceneged - .+\(ceneged_[a-z_]+\)$")
+# "Ceneged - Angra (CENEGED_ANGRA)", "Ceneged - Petrópolis" (esse sem sigla).
+# O "CENEGED - SOC MARICÁ" fica de fora.
+PADRAO_CO_NEGOCIACAO = re.compile(r"^ceneged - (?!soc\b).+")
 
 
 def eh_co_negociacao(texto: str) -> bool:
@@ -87,7 +88,7 @@ def cos_busca_tdc(driver) -> list[dict]:
 def main():
     parser = argparse.ArgumentParser(description="Descobre COs e buscas salvas da Negociação no eOrder.")
     parser.add_argument("--so-campo", action="store_true", help="Só os COs da Busca TdC.")
-    parser.add_argument("--co", action="append", help="Só este(s) value(s) de CO do Plano Diário.")
+    parser.add_argument("--co", action="append", help="Só este(s) CO(s) do Plano Diário: value ou trecho do nome.")
     args = parser.parse_args()
 
     config.validar_config()
@@ -98,7 +99,9 @@ def main():
         if not args.so_campo:
             cos = [c for c in cos_plano_diario(driver) if eh_co_negociacao(c["texto"])]
             if args.co:
-                cos = [c for c in cos if c["value"] in args.co]
+                alvos = [normalizar_texto(a) for a in args.co]
+                cos = [c for c in cos if c["value"] in args.co
+                       or any(a in normalizar_texto(c["texto"]) for a in alvos)]
             log(f"{len(cos)} CO(s) da Negociação no Plano Diário: {[c['texto'] for c in cos]}", PREFIXO_LOG)
             for i, co in enumerate(cos):
                 # Cada CO parte do Menu Principal recém-carregado, como a
