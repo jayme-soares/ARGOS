@@ -19,7 +19,6 @@ também é salvo (diagnostico_*.txt) para mapear campos se faltar busca salva.
 import argparse
 import json
 import re
-import time
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
@@ -27,7 +26,7 @@ from selenium.webdriver.support.ui import Select
 from argos import config
 from argos.eorder.busca_tdc import abrir_busca_tdc, salvar_diagnostico, selecionar_filtro
 from argos.eorder.driver import abrir_driver, fechar_driver
-from argos.eorder.programaveis import navegar_ate_atividades_programaveis
+from argos.eorder.programaveis import abrir_plano_diario, navegar_ate_atividades_programaveis
 from argos.eorder.sessao import login
 from argos.eorder.ui import debug_screenshot, encontrar_elemento_visivel, normalizar_texto
 from argos.log import log
@@ -49,17 +48,8 @@ def _opcoes(select_el) -> list[dict]:
     ]
 
 
-def _abrir_plano_diario(driver):
-    from argos.eorder.ui import click_by_text
-
-    click_by_text(driver, "Planejamento", tag="div")
-    time.sleep(0.5)
-    click_by_text(driver, "Plano Diário", tag="div")
-    time.sleep(1)
-
-
 def cos_plano_diario(driver) -> list[dict]:
-    _abrir_plano_diario(driver)
+    abrir_plano_diario(driver)
     sel = encontrar_elemento_visivel(driver, By.NAME, "_lyAUTEID_AFIL", timeout=config.WAIT_TIMEOUT)
     return _opcoes(sel)
 
@@ -111,6 +101,9 @@ def main():
                 cos = [c for c in cos if c["value"] in args.co]
             log(f"{len(cos)} CO(s) da Negociação no Plano Diário: {[c['texto'] for c in cos]}", PREFIXO_LOG)
             for i, co in enumerate(cos):
+                # Cada CO parte do Menu Principal recém-carregado, como a
+                # primeira volta do bot: não herda a tela do anterior.
+                login(driver)
                 item = dict(co)
                 try:
                     item["buscas_salvas"] = buscas_salvas_do_co(driver, co["value"], diagnostico=(i == 0))
@@ -120,9 +113,7 @@ def main():
                     log(f"{co['texto']}: ERRO {item['erro']}", PREFIXO_LOG)
                     debug_screenshot(driver, f"descoberta_co_{co['value']}")
                 resultado["plano_diario"].append(item)
-                # Recomeça do Menu Principal: o próximo CO não herda a tela
-                # (nem uma tela quebrada) do anterior.
-                login(driver)
+            login(driver)
 
         resultado["busca_tdc"] = cos_busca_tdc(driver)
         log(f"Busca TdC: {[c['texto'] for c in resultado['busca_tdc'] if eh_co_negociacao(c['texto'])]}", PREFIXO_LOG)

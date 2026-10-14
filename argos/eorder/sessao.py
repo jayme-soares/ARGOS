@@ -11,11 +11,29 @@ from argos.eorder.ui import debug_screenshot
 
 def login(driver):
     """Loga no eOrder. `webdriver.Chrome()` abre uma instância nova (perfil
-    limpo, sem cookies), então o login sempre acontece de verdade aqui."""
+    limpo, sem cookies), então o primeiro login acontece de verdade aqui.
+
+    Também serve para recomeçar do Menu Principal no meio de uma sessão
+    (troca de CO, tela quebrada): com a sessão ainda viva o eOrder não mostra
+    o formulário, vai direto ao Menu Principal. Por isso apaga os cookies
+    antes e, se mesmo assim cair no menu, aceita."""
+    try:
+        driver.delete_all_cookies()
+    except Exception:
+        pass
     driver.get(config.BASE_URL)
     wait = WebDriverWait(driver, config.WAIT_TIMEOUT)
 
-    user_field = wait.until(EC.presence_of_element_located((By.NAME, "USER")))
+    wait.until(
+        EC.any_of(
+            EC.presence_of_element_located((By.NAME, "USER")),
+            EC.presence_of_element_located((By.XPATH, "//*[contains(normalize-space(text()),'Menu Principal')]")),
+        )
+    )
+    campos = driver.find_elements(By.NAME, "USER")
+    if not campos:
+        return
+    user_field = campos[0]
     user_field.clear()
     user_field.send_keys(config.EORDER_USER)
     pass_field = driver.find_element(By.ID, "INPUTPASS")

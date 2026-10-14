@@ -108,10 +108,14 @@ class MonitorProgramaveis(threading.Thread):
         saude.atualizar_status(self.NOME, estado, chave="programaveis", contratos=(self.contrato,))
 
     def _ir_para_co(self, driver, co):
-        """Troca de CO pelo caminho normal; se a tela não responder, reloga
-        e tenta de novo."""
+        """Troca de CO. Com o Plano Diário já aberto, entrar de novo pelo
+        menu cai em outra tela (testado na descoberta), então a troca parte
+        do Menu Principal recém-carregado; se falhar, reloga e tenta de novo."""
+        primeira = self._co_atual is None
         self._co_atual = None
         try:
+            if not primeira:
+                login(driver)
             navegar_ate_atividades_programaveis(driver, co.value)
         except Exception as e:
             log(f"Troca para o CO {co.nome} falhou ({str(e).splitlines()[0]}); relogando.", self.PREFIXO)

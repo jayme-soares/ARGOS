@@ -51,12 +51,22 @@ def filtrar_municipio(registros: list[dict], municipio: str | None = None) -> li
     return [r for r in registros if normalizar_texto(municipio_do_endereco(r.get("endereco"))) == alvo]
 
 
+def abrir_plano_diario(driver):
+    """Menu lateral: Planejamento > Plano Diário. "Planejamento" abre e fecha
+    o submenu a cada clique: se ele já está aberto (ex.: troca de CO), clicar
+    de novo esconde o "Plano Diário"."""
+    try:
+        click_by_text(driver, "Plano Diário", tag="div", timeout=2)
+    except Exception:
+        click_by_text(driver, "Planejamento", tag="div")
+        time.sleep(0.5)
+        click_by_text(driver, "Plano Diário", tag="div")
+    time.sleep(1)
+
+
 def navegar_ate_atividades_programaveis(driver, co_value: str | None = None):
     # 1. Menu lateral: Planejamento > Plano Diário
-    click_by_text(driver, "Planejamento", tag="div")
-    time.sleep(0.5)
-    click_by_text(driver, "Plano Diário", tag="div")
-    time.sleep(1)
+    abrir_plano_diario(driver)
 
     # 2. O painel geral abre sozinho ao entrar em Plano Diário. É preciso
     #    escolher o Centro Operativo e clicar em "Busca" — SÓ DEPOIS que essa
