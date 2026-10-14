@@ -1,4 +1,8 @@
-"""Plano Diário > Atividades Programáveis > busca salva "CENEGED RELIGAÇÃO MARICA"."""
+"""Plano Diário > Centro Operativo > Atividades Programáveis > busca salva.
+
+SOC: CO "Valtellina - Niterói" e busca "CENEGED RELIGAÇÃO MARICA". Na
+Negociação cada CO "Ceneged - X" tem a própria busca salva (ver
+argos/contratos.py e argos/eorder/descobrir.py)."""
 
 import re
 import time
@@ -40,14 +44,14 @@ def municipio_do_endereco(endereco: str | None) -> str:
     return trecho.rsplit(" - ", 1)[0].strip()
 
 
-def filtrar_municipio(registros: list[dict]) -> list[dict]:
+def filtrar_municipio(registros: list[dict], municipio: str | None = None) -> list[dict]:
     """A busca salva traz ordens de todo o Centro Operativo (Niterói também);
-    só ficam as do município configurado (config.MUNICIPIO_CAMPO)."""
-    alvo = normalizar_texto(config.MUNICIPIO_CAMPO)
+    só ficam as do município configurado (padrão: config.MUNICIPIO_CAMPO)."""
+    alvo = normalizar_texto(municipio or config.MUNICIPIO_CAMPO)
     return [r for r in registros if normalizar_texto(municipio_do_endereco(r.get("endereco"))) == alvo]
 
 
-def navegar_ate_atividades_programaveis(driver):
+def navegar_ate_atividades_programaveis(driver, co_value: str | None = None):
     # 1. Menu lateral: Planejamento > Plano Diário
     click_by_text(driver, "Planejamento", tag="div")
     time.sleep(0.5)
@@ -60,7 +64,7 @@ def navegar_ate_atividades_programaveis(driver):
     #    ("Plano Diário | Clipboard | Atividades Programáveis | ...").
     try:
         centro_el = encontrar_elemento_visivel(driver, By.NAME, "_lyAUTEID_AFIL", timeout=config.WAIT_TIMEOUT)
-        Select(centro_el).select_by_value(config.CENTRO_OPERATIVO_VALUE)
+        Select(centro_el).select_by_value(co_value or config.CENTRO_OPERATIVO_VALUE)
         # O GWT recarrega o painel após trocar o centro; clicar em "Busca"
         # antes disso faz o clique se perder (testado: 1s não bastava).
         time.sleep(3)
@@ -88,11 +92,11 @@ def navegar_ate_atividades_programaveis(driver):
     time.sleep(1)
 
 
-def preencher_busca(driver, prazo_final: datetime):
+def preencher_busca(driver, prazo_final: datetime, busca_value: str | None = None):
     # Busca salva — encontrar_elemento_visivel porque o GWT mantém campos de
     # OUTRAS abas escondidos no DOM com o mesmo `name`.
     select_el = encontrar_elemento_visivel(driver, By.NAME, "_lyXWFMARSAID", timeout=config.WAIT_TIMEOUT)
-    Select(select_el).select_by_value(config.SAVED_SEARCH_VALUE)
+    Select(select_el).select_by_value(busca_value or config.SAVED_SEARCH_VALUE)
 
     # Expandir seção "Datas" caso esteja colapsada
     try:
