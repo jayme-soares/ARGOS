@@ -1,9 +1,13 @@
 "use strict";
 
-// ARGOS — painel das equipes de campo (/equipe). Cada equipe entra com o
-// código (NI2...) e a senha e vê só as próprias religas: as em aberto, com
-// contagem regressiva, e as finalizadas, no prazo ou fora. O filtro por
-// equipe é feito no servidor (/api/snapshot).
+// ARGOS — painel das equipes de campo (/equipe). Cada equipe escolhe o
+// contrato (SOC ou Negociação), entra com o código e a senha e vê só as
+// próprias religas: as em aberto, com contagem regressiva, e as finalizadas,
+// no prazo ou fora. O filtro por equipe é feito no servidor (/api/snapshot).
+//
+// Código da equipe: na SOC, o "Código Equipe" (NI2...); na Negociação, o
+// nome da equipe em forma de código (CENEGED-ANGRA-01), o mesmo que o bot
+// gera (argos/contratos.py, slug_equipe).
 //
 // Avisos (religa designada, perto de vencer, vencida) chegam por push e
 // ficam pendentes em argos_avisos_equipe até a equipe confirmar: enquanto
@@ -17,17 +21,39 @@ const prefsSalvas = (() => {
 
 Object.assign(estado, {
   aba: "abertas",
+  contratoLogin: prefsSalvas.contrato === "negociacao" ? "negociacao" : "soc",
   periodo: "hoje",
   avisos: [],        // avisos pendentes da equipe
   cfg: null,         // /api/config
 });
 
 function salvarPrefs() {
-  gravarStorage(localStorage, CHAVE_PREFS, JSON.stringify({ tema: document.documentElement.dataset.theme || null }));
+  gravarStorage(localStorage, CHAVE_PREFS, JSON.stringify({
+    tema: document.documentElement.dataset.theme || null, contrato: estado.contratoLogin,
+  }));
 }
 
-const normalizarCodigo = (c) => String(c || "").replace(/\s+/g, "").toUpperCase();
-const emailDaEquipe = (codigo) => `${normalizarCodigo(codigo).toLowerCase()}@${estado.cfg?.dominioEquipes || "equipes.argos.local"}`;
+// Iguais a web/api/_equipes.js.
+const slugEquipe = (nome) => String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+const normalizarCodigo = (c, contrato = estado.contratoLogin) =>
+  (contrato === "negociacao" ? slugEquipe(c) : String(c || "").replace(/\s+/g, "").toUpperCase());
+const codigoValido = (c, contrato = estado.contratoLogin) =>
+  (contrato === "negociacao" ? /^[A-Z0-9][A-Z0-9-]{1,59}$/ : /^NI2[A-Z0-9-]{2,30}$/).test(c);
+const emailDaEquipe = (codigo, contrato = estado.contratoLogin) =>
+  `${contrato === "negociacao" ? "neg-" : ""}${normalizarCodigo(codigo, contrato).toLowerCase()}@${estado.cfg?.dominioEquipes || "equipes.argos.local"}`;
+const DICA_CODIGO = {
+  soc: "o código da equipe (começa com NI2)",
+  negociacao: "o código da equipe (o nome da equipe, como CENEGED-ANGRA-01, passado pela coordenação)",
+};
+
+function definirContratoLogin(contrato) {
+  estado.contratoLogin = contrato;
+  for (const b of $$("#login-contrato .chip")) b.setAttribute("aria-pressed", String(b.dataset.contrato === contrato));
+  $("#login-codigo").placeholder = contrato === "negociacao" ? "CENEGED-…" : "NI2…";
+  definirModoCadastro(modoCadastro);
+  salvarPrefs();
+}
 
 // ------------------------------------------------------------------
 // TELAS
@@ -100,12 +126,17 @@ function definirModoCadastro(ativo) {
   $("#btn-login").textContent = ativo ? "Criar acesso da equipe" : "Entrar";
   $("#btn-alternar-cadastro").textContent = ativo ? "Já tenho acesso: entrar" : "Primeiro acesso? Cadastre a equipe";
   $("#btn-esqueci").hidden = ativo;
+  const dica = DICA_CODIGO[estado.contratoLogin];
   $("#login-dica").textContent = ativo
-    ? "Use o código da equipe (começa com NI2) e crie uma senha de pelo menos 8 caracteres. Um administrador precisa aprovar o acesso."
-    : "Entre com o código da equipe (começa com NI2) e a senha.";
+    ? `Use ${dica} e crie uma senha de pelo menos 8 caracteres. Um administrador precisa aprovar o acesso.`
+    : `Entre com ${dica} e a senha.`;
   $("#login-erro").textContent = "";
 }
-definirModoCadastro(false);
+definirContratoLogin(estado.contratoLogin);
+$("#login-contrato").addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-contrato]");
+  if (b) definirContratoLogin(b.dataset.contrato);
+});
 $("#btn-alternar-cadastro").addEventListener("click", () => definirModoCadastro(!modoCadastro));
 
 async function entrar(codigo, senha) {
@@ -123,7 +154,7 @@ async function cadastrar(codigo, senha) {
   const r = await fetch("/api/equipe-cadastro", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ codigo, senha }),
+    body: JSON.stringify({ codigo, senha, contrato: estado.contratoLogin }),
   });
   const corpo = await r.json().catch(() => ({}));
   if (!r.ok) { $("#login-erro").textContent = corpo.erro || `Erro ${r.status}`; return false; }
@@ -135,7 +166,12 @@ $("#form-login").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const codigo = normalizarCodigo($("#login-codigo").value);
   const senha = $("#login-senha").value;
-  if (!/^NI2/.test(codigo)) { $("#login-erro").textContent = "O código da equipe começa com NI2."; return; }
+  if (!codigoValido(codigo)) {
+    $("#login-erro").textContent = estado.contratoLogin === "negociacao"
+      ? "Código de equipe inválido. Use o código passado pela coordenação."
+      : "O código da equipe começa com NI2.";
+    return;
+  }
   $("#btn-login").disabled = true;
   try {
     if (!modoCadastro) $("#login-erro").textContent = "Entrando…";
@@ -152,12 +188,12 @@ $("#form-login").addEventListener("submit", async (ev) => {
 
 $("#btn-esqueci").addEventListener("click", async () => {
   const codigo = normalizarCodigo($("#login-codigo").value);
-  if (!/^NI2/.test(codigo)) {
+  if (!codigoValido(codigo)) {
     $("#login-erro").textContent = "Preencha o código da equipe e toque em “Esqueci a senha” de novo.";
     $("#login-codigo").focus();
     return;
   }
-  const { error } = await estado.sb.rpc("argos_equipe_pedir_reset", { p_codigo: codigo });
+  const { error } = await estado.sb.rpc("argos_equipe_pedir_reset", { p_codigo: codigo, p_contrato: estado.contratoLogin });
   $("#login-erro").textContent = error
     ? `Não foi possível registrar o pedido: ${error.message}`
     : "Pedido registrado. O administrador vai gerar uma senha temporária: fale com a coordenação para recebê-la.";
@@ -273,7 +309,7 @@ function renderizar() {
   const finalizadas = enriquecerFinalizadas(snap?.campo?.finalizadas);
   const finHoje = finalizadas.filter((r) => finalizadaHoje(r, agora));
 
-  $("#nome-equipe").textContent = `Equipe ${estado.acesso.equipe || ""}`;
+  $("#nome-equipe").textContent = `Equipe ${estado.acesso.nome || estado.acesso.equipe || ""}`;
   const st = descreverStatus(snap?.status?.campo);
   const atualizado = data(snap?.campo?.atualizado_em);
   $("#status").innerHTML = `<span class="pill"><span class="ponto ${st.cls}"></span><b>Dados</b> ${esc(st.txt)}${atualizado ? ` · ${esc(fmtHora.format(atualizado))}` : ""}</span>`;
@@ -342,7 +378,7 @@ function renderFaixaPush() {
 document.addEventListener("argos:push", () => { if (estado.acesso) renderFaixaPush(); });
 
 function linkMapa(r) {
-  const alvo = [r.endereco, r.bairro, "Maricá - RJ"].filter(Boolean).join(", ");
+  const alvo = [r.endereco, r.bairro, `${r.municipio || "Maricá"} - RJ`].filter(Boolean).join(", ");
   return r.endereco ? `<a class="eq-mapa" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(alvo)}" target="_blank" rel="noopener">Abrir no mapa</a>` : "";
 }
 

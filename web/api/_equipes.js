@@ -1,15 +1,25 @@
 // Utilitários das contas de equipe, compartilhados pelas funções /api/*.
 // (Arquivos com "_" na frente não viram rota no Vercel.)
 
-// As equipes entram com o código (NI2...) e a senha; o Supabase exige
-// e-mail, então cada conta usa um e-mail sintético neste domínio.
+// As equipes entram com o código e a senha; o Supabase exige e-mail, então
+// cada conta usa um e-mail sintético neste domínio. SOC: <código>@domínio
+// (código NI2...). Negociação: neg-<código>@domínio, com o código derivado do
+// nome da equipe (slugEquipe, igual a slug_equipe em argos/contratos.py).
 export const DOMINIO_EQUIPES = process.env.ARGOS_DOMINIO_EQUIPES || "equipes.argos.local";
 
-export const normalizarCodigo = (codigo) => String(codigo || "").replace(/\s+/g, "").toUpperCase();
+export const CONTRATOS = ["soc", "negociacao"];
 
-export const codigoValido = (codigo) => /^NI2[A-Z0-9-]{2,30}$/.test(codigo);
+export const slugEquipe = (nome) => String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  .toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
-export const emailDaEquipe = (codigo) => `${normalizarCodigo(codigo).toLowerCase()}@${DOMINIO_EQUIPES}`;
+export const normalizarCodigo = (codigo, contrato = "soc") =>
+  (contrato === "negociacao" ? slugEquipe(codigo) : String(codigo || "").replace(/\s+/g, "").toUpperCase());
+
+export const codigoValido = (codigo, contrato = "soc") =>
+  (contrato === "negociacao" ? /^[A-Z0-9][A-Z0-9-]{1,59}$/ : /^NI2[A-Z0-9-]{2,30}$/).test(codigo);
+
+export const emailDaEquipe = (codigo, contrato = "soc") =>
+  `${contrato === "negociacao" ? "neg-" : ""}${normalizarCodigo(codigo, contrato).toLowerCase()}@${DOMINIO_EQUIPES}`;
 
 // Chamada à API admin do Supabase Auth com a service role (só no servidor).
 export async function authAdmin(caminho, { method = "GET", body } = {}) {

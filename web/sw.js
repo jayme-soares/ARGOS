@@ -25,14 +25,19 @@ self.addEventListener("push", (ev) => {
 
 // Tocar na notificação: volta para o painel do aviso (gestão "/" ou equipe
 // "/equipe") se já estiver aberto, senão leva uma janela aberta até ele ou
-// abre uma nova.
+// abre uma nova. Na gestão, o ?contrato= do aviso vai para a janela aberta
+// (app.js troca para o painel daquele contrato).
 self.addEventListener("notificationclick", (ev) => {
   ev.notification.close();
   ev.waitUntil((async () => {
     const destino = new URL(ev.notification.data?.url || "/", self.location.origin);
     const janelas = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const mesma = janelas.find((j) => new URL(j.url).pathname === destino.pathname);
-    if (mesma && "focus" in mesma) return mesma.focus();
+    if (mesma && "focus" in mesma) {
+      const contrato = destino.searchParams.get("contrato");
+      if (contrato) mesma.postMessage({ tipo: "argos:contrato", contrato });
+      return mesma.focus();
+    }
     const outra = janelas.find((j) => "navigate" in j);
     if (outra) {
       try { return (await outra.navigate(destino.href))?.focus(); } catch { /* janela não controlada */ }

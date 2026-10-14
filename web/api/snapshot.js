@@ -1,9 +1,17 @@
 // Função serverless do Vercel: devolve o snapshot publicado pelo bot no
 // Upstash Redis, só para usuários logados no Supabase E aprovados no ARGOS
 // (tabela public.argos_acessos — ver supabase/migrations).
+//
+// Um snapshot por contrato (?contrato=soc|negociacao). A gestão só lê os
+// contratos liberados para ela (o administrador geral lê todos); a equipe lê
+// sempre o do próprio contrato, já filtrado pela equipe.
 const KEY = process.env.ARGOS_SNAPSHOT_KEY || "argos:snapshot";
+// Iguais a Contrato.snapshot_key em argos/contratos.py.
+const CHAVES = { soc: KEY, negociacao: `${KEY}:negociacao` };
 
 const normalizarEquipe = (e) => String(e || "").replace(/\s+/g, "").toUpperCase();
+// Igual a argos_contratos_efetivos() no banco.
+const contratosDe = (a) => (a.super_admin ? Object.keys(CHAVES) : (a.contratos || []));
 
 // Equipes de campo só recebem as próprias ordens (em aberto e finalizadas),
 // sem as programáveis: o filtro é feito aqui no servidor para que nenhuma
@@ -21,6 +29,7 @@ function snapshotDaEquipe(snapshot, equipe) {
       alertas_min: snapshot.config?.alertas_min,
       push_chave_publica: snapshot.config?.push_chave_publica,
     },
+    contrato: snapshot.contrato,
     equipe,
     campo: {
       atualizado_em: campo.atualizado_em,
@@ -79,9 +88,16 @@ export default async function handler(req, res) {
   if (ehEquipe && acesso.trocar_senha) {
     return res.status(403).json({ erro: "Defina uma nova senha para continuar.", status: "trocar_senha" });
   }
+  const contrato = ehEquipe ? (acesso.contrato || "soc") : String(req.query?.contrato || "soc");
+  if (!CHAVES[contrato]) {
+    return res.status(400).json({ erro: "Contrato inválido." });
+  }
+  if (!ehEquipe && !contratosDe(acesso).includes(contrato)) {
+    return res.status(403).json({ erro: "Este painel não está liberado para você.", status: "sem_contrato" });
+  }
 
   try {
-    const r = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(KEY)}`, {
+    const r = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(CHAVES[contrato])}`, {
       headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
     });
     if (!r.ok) {

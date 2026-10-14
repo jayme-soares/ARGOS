@@ -140,6 +140,8 @@ function descreverStatus(st) {
   const e = st?.estado || "sem dados";
   if (e === "ok") return { cls: "ok", txt: "ok" };
   if (e === "fora_do_horario") return { cls: "pausa", txt: "fora do horário" };
+  // Negociação: algum CO falhou, os outros foram lidos.
+  if (e.startsWith("erro parcial")) return { cls: "parcial", txt: "parcial" };
   if (e.startsWith("erro")) return { cls: "erro", txt: "erro" };
   return { cls: "ocupado", txt: e.replaceAll("_", " ") };
 }

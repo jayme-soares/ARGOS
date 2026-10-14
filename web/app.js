@@ -6,6 +6,10 @@
 //
 // Login pelo Supabase Auth (usuários da empresa). O acesso ao painel depende
 // da aprovação de um admin na tabela argos_acessos — ver supabase/migrations.
+//
+// Um painel por contrato (SOC e Negociação). Cada usuário vê os contratos
+// que o administrador geral liberou (argos_acessos.contratos); quem tem mais
+// de um alterna pelo seletor no topo.
 
 const CHAVE_PREFS = "argos.prefs";
 
@@ -16,11 +20,16 @@ const prefsSalvas = (() => {
   try { return JSON.parse(lerStorage(localStorage, CHAVE_PREFS) || "{}"); } catch { return {}; }
 })();
 
+const NOMES_CONTRATO = { soc: "SOC · Maricá", negociacao: "Negociação" };
+const CONTRATOS = Object.keys(NOMES_CONTRATO);
+
 Object.assign(estado, {
   aba: prefsSalvas.aba || "campo",
+  contrato: null,    // contrato exibido (ver escolherContrato)
   texto: "",
   equipe: "",
   bairro: "",
+  co: "",            // filtro por Centro Operativo (só Negociação)
   urg: "",
   periodo: "hoje",   // aba Finalizadas: "hoje" ou "" (toda a janela da extração)
   ordem: {
@@ -37,12 +46,43 @@ Object.assign(estado, {
   avisosEquipe: [],  // avisos às equipes dos últimos 7 dias
 });
 const ehAdmin = () => estado.acesso?.papel === "admin" && estado.acesso?.status === "aprovado";
+const ehSuperAdmin = () => ehAdmin() && !!estado.acesso?.super_admin;
+// Igual a argos_contratos_efetivos() no banco: o administrador geral vê todos.
+const contratosDe = (a) => (a?.super_admin ? CONTRATOS : (a?.contratos || []).filter((c) => CONTRATOS.includes(c)));
+const multiCo = () => estado.contrato === "negociacao";
 
 function salvarPrefs() {
-  gravarStorage(localStorage, CHAVE_PREFS, JSON.stringify({ aba: estado.aba, tema: document.documentElement.dataset.theme || null }));
+  gravarStorage(localStorage, CHAVE_PREFS, JSON.stringify({
+    aba: estado.aba, contrato: estado.contrato, tema: document.documentElement.dataset.theme || null,
+  }));
+}
+
+// Contrato da URL (link do push), senão o atual, senão o último usado,
+// senão o primeiro liberado.
+function escolherContrato() {
+  const liberados = contratosDe(estado.acesso);
+  const daUrl = new URLSearchParams(location.search).get("contrato");
+  for (const c of [daUrl, estado.contrato, prefsSalvas.contrato]) {
+    if (liberados.includes(c)) { estado.contrato = c; return; }
+  }
+  estado.contrato = liberados[0] || null;
+}
+
+function trocarContrato(contrato) {
+  if (contrato === estado.contrato) return;
+  estado.contrato = contrato;
+  Object.assign(estado, { snapshot: null, equipe: "", bairro: "", co: "", urg: "", equipesResumo: [], avisosEquipe: [] });
+  // O ?contrato= do link do push não pode prender o painel no contrato antigo.
+  if (location.search) history.replaceState(null, "", location.pathname);
+  salvarPrefs();
+  renderizar();
+  buscarSnapshot();
 }
 
 const ABAS_COM_EQUIPE = new Set(["campo", "finalizadas", "avisos"]);
+const ABAS_COM_CO = new Set(["campo", "programaveis", "finalizadas"]);
+// Na Negociação a equipe é o nome (coluna "Equipe"); `equipe` é a chave.
+const nomeEquipe = (r) => r.equipe_nome || r.equipe;
 const normEquipe = (e) => String(e || "").replace(/\s+/g, "").toUpperCase();
 
 // ------------------------------------------------------------------
@@ -55,11 +95,15 @@ async function buscarSnapshot() {
   try {
     const token = await tokenAtual();
     if (!token) { await sair("Sessão expirada. Entre novamente."); return false; }
-    const r = await fetch("/api/snapshot", { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+    const contrato = estado.contrato;
+    const r = await fetch(`/api/snapshot?contrato=${encodeURIComponent(contrato)}`, {
+      headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+    });
     const corpo = await r.json().catch(() => ({}));
     if (r.status === 401) { await sair(corpo.erro || "Sessão expirada. Entre novamente."); return false; }
     if (r.status === 403) { await verificarAcesso(); return false; }  // revogado enquanto usava
     if (!r.ok) throw new Error(corpo.erro || `Erro ${r.status}`);
+    if (contrato !== estado.contrato) return false;  // trocou de contrato no meio da leitura
     estado.snapshot = corpo;
     estado.ultimoErro = null;
     if (!estado.pushSincronizado) { estado.pushSincronizado = true; sincronizarPush(); }
@@ -82,15 +126,18 @@ async function carregarAcessos() {
   if (!error) estado.acessos = data || [];
 }
 
-// Contas das equipes e avisos (supabase/migrations/003_argos_equipes.sql).
-// Sem a migração aplicada, as chamadas falham e o painel segue sem esses dados.
+// Contas das equipes e avisos do contrato exibido (migrações 003 e 004).
+// Sem as migrações aplicadas, as chamadas falham e o painel segue sem esses dados.
 async function carregarDadosEquipes() {
+  const contrato = estado.contrato;
   const desde = new Date(Date.now() - 7 * 86400000).toISOString();
   const [resumo, avisos] = await Promise.all([
     estado.sb.rpc("argos_equipes_resumo"),
-    estado.sb.from("argos_avisos_equipe").select("*").gte("criado_em", desde).order("criado_em", { ascending: false }).limit(3000),
+    estado.sb.from("argos_avisos_equipe").select("*").eq("contrato", contrato).gte("criado_em", desde)
+      .order("criado_em", { ascending: false }).limit(3000),
   ]);
-  if (!resumo.error) estado.equipesResumo = resumo.data || [];
+  if (contrato !== estado.contrato) return;
+  if (!resumo.error) estado.equipesResumo = (resumo.data || []).filter((c) => c.contrato === contrato);
   if (!avisos.error) estado.avisosEquipe = avisos.data || [];
 }
 
@@ -137,11 +184,16 @@ function mostrarLogin(mensagem) {
 function mostrarEspera(status, email) {
   pararTimers();
   mostrarTela("#tela-espera");
-  const recusado = status === "recusado";
-  $("#espera-titulo").textContent = recusado ? "Acesso não liberado" : "Aguardando aprovação";
-  $("#espera-texto").textContent = recusado
-    ? "Seu acesso ao ARGOS foi recusado ou revogado por um administrador. Fale com a coordenação se achar que é um engano."
-    : "Seu pedido de acesso foi registrado. Assim que um administrador aprovar, é só clicar em “Verificar novamente”.";
+  const textos = {
+    recusado: ["Acesso não liberado",
+      "Seu acesso ao ARGOS foi recusado ou revogado por um administrador. Fale com a coordenação se achar que é um engano."],
+    sem_contrato: ["Aguardando liberação de contrato",
+      "Seu acesso foi aprovado, mas ainda não há painel (SOC ou Negociação) liberado para você. Assim que o administrador geral liberar, é só clicar em “Verificar novamente”."],
+  };
+  const [titulo, texto] = textos[status] || ["Aguardando aprovação",
+    "Seu pedido de acesso foi registrado. Assim que um administrador aprovar, é só clicar em “Verificar novamente”."];
+  $("#espera-titulo").textContent = titulo;
+  $("#espera-texto").textContent = texto;
   $("#espera-email").textContent = email || "";
 }
 
@@ -168,8 +220,13 @@ async function verificarAcesso({ silencioso = false } = {}) {
   // Contas de equipe usam o painel próprio, só com as ordens delas.
   if (data?.papel === "equipe") { location.replace("/equipe"); return; }
   estado.acesso = data;
-  if (data?.status === "aprovado") {
+  if (data?.status === "aprovado" && !contratosDe(data).length) {
+    mostrarEspera("sem_contrato", sessao.session.user.email);
+  } else if (data?.status === "aprovado") {
+    const anterior = estado.contrato;
+    escolherContrato();
     if ($("#tela-painel").hidden) iniciarPainel();
+    else if (anterior !== estado.contrato) { estado.snapshot = null; buscarSnapshot(); }  // perdeu o contrato exibido
   } else {
     mostrarEspera(data?.status, sessao.session.user.email);
   }
@@ -264,12 +321,13 @@ function renderizar() {
   const programaveis = enriquecer(snap?.programaveis?.registros, agora);
   const finalizadas = enriquecerFinalizadas(snap?.campo?.finalizadas);
 
+  renderContrato();
   renderStatus(snap, agora);
   renderExtracao(snap, campo, agora);
   renderAvisos(snap, agora);
   renderKpis(snap, campo, programaveis, finalizadas, agora);
   renderAbas(campo, programaveis, finalizadas, agora);
-  renderFiltros(campo, finalizadas);
+  renderFiltros(campo, finalizadas, programaveis);
   if (estado.aba === "acessos" && !ehAdmin()) estado.aba = "campo";
   renderTabela(campo, programaveis, finalizadas, agora);
   $("#usuario-atual").textContent = estado.acesso?.email || "";
@@ -277,6 +335,19 @@ function renderizar() {
   $("#rodape-info").textContent = snap?.gerado_em
     ? `Snapshot gerado às ${fmtHora.format(data(snap.gerado_em))} · atualiza a cada 60s · cores recalculadas a cada 30s`
     : "";
+}
+
+function renderContrato() {
+  const liberados = contratosDe(estado.acesso);
+  const sel = $("#seletor-contrato");
+  sel.hidden = liberados.length < 2;
+  const html = liberados
+    .map((c) => `<button class="chip" data-contrato="${c}">${esc(NOMES_CONTRATO[c])}</button>`).join("");
+  if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
+  for (const b of $$("#seletor-contrato .chip")) b.setAttribute("aria-pressed", String(b.dataset.contrato === estado.contrato));
+  const nome = NOMES_CONTRATO[estado.contrato] || "";
+  $("#subtitulo-painel").textContent = `Religações · ${nome}`;
+  document.title = `ARGOS · ${nome || "Religações"}`;
 }
 
 function renderStatus(snap, agora) {
@@ -310,7 +381,10 @@ function renderAvisos(snap, agora) {
     }
     for (const [chave, nome] of [["programaveis", "Programáveis"], ["campo", "Em campo"]]) {
       const e = snap.status?.[chave]?.estado || "";
-      if (e.startsWith("erro")) avisos.push({ erro: true, txt: `${nome}: ${e.slice(0, 240)}` });
+      if (e.startsWith("erro") && !e.startsWith("erro parcial")) avisos.push({ erro: true, txt: `${nome}: ${e.slice(0, 240)}` });
+      // Negociação: um CO que falhou na última leitura mantém os dados anteriores.
+      const cos = snap[chave]?.cos_com_erro || [];
+      if (cos.length) avisos.push({ txt: `${nome}: sem dados novos de ${cos.join(", ")} na última leitura (ficaram os anteriores).` });
     }
   }
   $("#avisos").innerHTML = avisos.map((a) => `<div class="aviso${a.erro ? " erro" : ""}">${esc(a.txt)}</div>`).join("");
@@ -383,16 +457,23 @@ function renderAbas(campo, programaveis, finalizadas, agora) {
   for (const b of $$(".aba")) b.setAttribute("aria-selected", String(b.dataset.aba === estado.aba));
 }
 
-function preencherSelect(sel, valores, atual, rotuloTodos) {
+function preencherSelect(sel, valores, atual, rotuloTodos, rotulo = (v) => v) {
   const opcoes = [`<option value="">${rotuloTodos}</option>`]
-    .concat(valores.map((v) => `<option value="${esc(v)}"${v === atual ? " selected" : ""}>${esc(v || "(sem)")}</option>`));
+    .concat(valores.map((v) => `<option value="${esc(v)}"${v === atual ? " selected" : ""}>${esc(rotulo(v) || "(sem)")}</option>`));
   const html = opcoes.join("");
   if (sel.dataset.html !== html) { sel.innerHTML = html; sel.dataset.html = html; }
   sel.value = atual;
 }
 
-function renderFiltros(campo, finalizadas) {
+function renderFiltros(campo, finalizadas, programaveis) {
   $("#filtros").hidden = estado.aba === "equipes" || estado.aba === "acessos";
+  const comCo = multiCo() && ABAS_COM_CO.has(estado.aba);
+  $("#filtro-co").hidden = !comCo;
+  if (comCo) {
+    const baseCo = { campo, finalizadas, programaveis }[estado.aba];
+    const cos = [...new Set(baseCo.map((r) => r.co || ""))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+    preencherSelect($("#filtro-co"), cos, estado.co, "Todos os COs", nomeCo);
+  }
   const comEquipe = ABAS_COM_EQUIPE.has(estado.aba);
   const ehFinalizadas = estado.aba === "finalizadas";
   $("#filtro-equipe").hidden = !comEquipe;
@@ -412,20 +493,26 @@ function renderFiltros(campo, finalizadas) {
 
 // ---------- colunas ----------
 const celRestante = (r) => `<span class="badge">${esc(textoRestante(r._min))}</span>`;
+// "Ceneged - Angra (CENEGED_ANGRA)" -> "Angra".
+const nomeCo = (co) => String(co || "").replace(/^\s*ceneged\s*-\s*/i, "").replace(/\s*\([^)]*\)\s*$/, "");
+// Coluna CO: só no painel da Negociação (ver colunasDa).
+const COLUNA_CO = { id: "co", rotulo: "CO", multiCo: true, valor: (r) => nomeCo(r.co), html: (r) => esc(nomeCo(r.co)) };
 const COLUNAS = {
   campo: [
     { id: "restante", rotulo: "Tempo restante", valor: (r) => r._min, html: celRestante },
     { id: "vencimento", rotulo: "Vencimento", valor: (r) => r._min, html: (r) => `<span class="num">${esc(diaHora(r._venc))}</span>` },
+    COLUNA_CO,
     { id: "ordem", rotulo: "Ordem", valor: (r) => r.ordem, html: (r) => `<span class="num">${esc(r.ordem)}</span>` },
     { id: "tdc", rotulo: "TdC", valor: (r) => r.tdc, html: (r) => `<span class="num">${esc(r.tdc)}</span>` },
     { id: "cliente", rotulo: "Cliente", valor: (r) => r.cliente, html: (r) => `<span class="num">${esc(r.cliente)}</span>${r.nome_cliente ? `<div class="secundario">${esc(r.nome_cliente)}</div>` : ""}` },
-    { id: "equipe", rotulo: "Equipe", valor: (r) => r.equipe, html: (r) => r.equipe ? esc(r.equipe) : `<span class="fraco">sem equipe</span>` },
+    { id: "equipe", rotulo: "Equipe", valor: (r) => nomeEquipe(r), html: (r) => r.equipe ? esc(nomeEquipe(r)) : `<span class="fraco">sem equipe</span>` },
     { id: "bairro", rotulo: "Bairro", valor: (r) => r.bairro, html: (r) => `${esc(r.bairro)}${r.endereco ? `<div class="secundario celula-endereco" title="${esc(r.endereco)}">${esc(r.endereco)}</div>` : ""}`, cheio: true },
     { id: "tipo", rotulo: "Tipo", valor: (r) => r.tipo, html: (r) => esc(r.tipo), cheio: true },
   ],
   programaveis: [
     { id: "restante", rotulo: "Tempo restante", valor: (r) => r._min, html: celRestante },
     { id: "vencimento", rotulo: "Vencimento", valor: (r) => r._min, html: (r) => `<span class="num">${esc(diaHora(r._venc))}</span>` },
+    COLUNA_CO,
     { id: "tdc", rotulo: "TdC", valor: (r) => r.tdc, html: (r, agora) => {
       const visto = data(r.primeiro_visto_em);
       const novo = visto && agora - visto <= 30 * 60000 ? `<span class="novo">NOVA</span>` : "";
@@ -441,16 +528,17 @@ const COLUNAS = {
     { id: "finalizada", rotulo: "Finalizada em", valor: (r) => r.finalizada_em, html: (r) => `<span class="num">${esc(diaHora(r._fim))}</span>` },
     { id: "situacao", rotulo: "Situação", valor: (r) => r._folga, html: (r) => `<span class="badge">${esc(textoSituacaoFinalizada(r))}</span>` },
     { id: "vencimento", rotulo: "Vencimento", valor: (r) => r.vencimento, html: (r) => `<span class="num">${esc(diaHora(r._venc))}</span>` },
+    COLUNA_CO,
     { id: "ordem", rotulo: "Ordem", valor: (r) => r.ordem, html: (r) => `<span class="num">${esc(r.ordem)}</span>` },
     { id: "tdc", rotulo: "TdC", valor: (r) => r.tdc, html: (r) => `<span class="num">${esc(r.tdc)}</span>` },
     { id: "cliente", rotulo: "Cliente", valor: (r) => r.cliente, html: (r) => `<span class="num">${esc(r.cliente)}</span>${r.nome_cliente ? `<div class="secundario">${esc(r.nome_cliente)}</div>` : ""}` },
-    { id: "equipe", rotulo: "Equipe", valor: (r) => r.equipe, html: (r) => esc(r.equipe) },
+    { id: "equipe", rotulo: "Equipe", valor: (r) => nomeEquipe(r), html: (r) => esc(nomeEquipe(r)) },
     { id: "bairro", rotulo: "Bairro", valor: (r) => r.bairro, html: (r) => `${esc(r.bairro)}${r.endereco ? `<div class="secundario celula-endereco" title="${esc(r.endereco)}">${esc(r.endereco)}</div>` : ""}`, cheio: true },
     { id: "tipo", rotulo: "Tipo", valor: (r) => r.tipo, html: (r) => esc(r.tipo), cheio: true },
     { id: "resultado", rotulo: "Resultado", valor: (r) => r.resultado, html: (r) => `${esc(r.resultado || "—")}${r.causa ? `<div class="secundario">${esc(r.causa)}</div>` : ""}`, cheio: true },
   ],
   equipes: [
-    { id: "equipe", rotulo: "Equipe", valor: (r) => r.equipe, html: (r) => `<button class="link-equipe" data-equipe="${esc(r.equipe)}">${esc(r.equipe || "(sem equipe)")}</button>` },
+    { id: "equipe", rotulo: "Equipe", valor: (r) => r.nome || r.equipe, html: (r) => `<button class="link-equipe" data-equipe="${esc(r.equipe)}">${esc(r.nome || r.equipe || "(sem equipe)")}</button>` },
     { id: "total", rotulo: "Em campo", valor: (r) => r.total, html: (r) => `<span class="num">${r.total}</span>` },
     { id: "vencidas", rotulo: "Vencidas", valor: (r) => r.vencidas, html: (r) => `<span class="num" style="color:${r.vencidas ? "var(--vencida)" : "var(--texto-3)"}">${r.vencidas}</span>` },
     { id: "finalizadas", rotulo: "Finalizadas hoje", valor: (r) => r.finalizadas, html: (r) => `<span class="num" style="color:${r.finalizadas ? "var(--ok)" : "var(--texto-3)"}">${r.finalizadas}</span>` },
@@ -468,6 +556,8 @@ const COLUNAS = {
     }, cheio: true },
   ],
 };
+
+const colunasDa = (aba) => COLUNAS[aba].filter((c) => !c.multiCo || multiCo());
 
 // Conta da equipe no painel /equipe (argos_equipes_resumo).
 function celVisto(conta, agora) {
@@ -529,17 +619,34 @@ COLUNAS.acessos = [
       const reset = a.reset_solicitado_em
         ? `<div class="secundario" style="color:var(--alerta)">pediu reset de senha ${esc(haQuanto(data(a.reset_solicitado_em), agora))}</div>` : "";
       const push = conta ? `<div class="secundario">push em ${conta.aparelhos} aparelho(s)</div>` : "";
-      return `${esc(a.equipe)} <span class="tag equipe">equipe</span>${reset}${push}`;
+      const nome = a.nome && a.nome !== a.equipe ? `<div class="secundario">${esc(a.nome)}</div>` : "";
+      return `${esc(a.equipe)} <span class="tag equipe">equipe</span>${nome}${reset}${push}`;
     }
-    return `${esc(a.nome || a.email)}${a.papel === "admin" ? ` <span class="tag admin">admin</span>` : ""}${a.nome ? `<div class="secundario">${esc(a.email)}</div>` : ""}`;
+    const papel = a.super_admin ? ` <span class="tag admin">admin geral</span>` : a.papel === "admin" ? ` <span class="tag admin">admin</span>` : "";
+    return `${esc(a.nome || a.email)}${papel}${a.nome ? `<div class="secundario">${esc(a.email)}</div>` : ""}`;
   } },
   { id: "status", rotulo: "Status", valor: (a) => ORDEM_STATUS[a.status], html: (a) => `<span class="tag ${esc(a.status)}">${esc(a.status)}</span>` },
+  // Painéis liberados. Só o administrador geral muda (argos_definir_contratos).
+  { id: "contratos", rotulo: "Painéis", valor: (a) => (a.papel === "equipe" ? a.contrato : contratosDe(a).join(",")), html: (a) => {
+    if (a.papel === "equipe") return `<span class="tag">${esc(NOMES_CONTRATO[a.contrato] || a.contrato || "")}</span>`;
+    if (a.super_admin) return `<span class="secundario">todos</span>`;
+    const atuais = contratosDe(a);
+    if (!ehSuperAdmin()) {
+      return atuais.length ? atuais.map((c) => `<span class="tag">${esc(NOMES_CONTRATO[c])}</span>`).join(" ") : `<span class="fraco">nenhum</span>`;
+    }
+    return `<div class="acoes-linha">${CONTRATOS.map((c) => {
+      const tem = atuais.includes(c);
+      const novos = tem ? atuais.filter((x) => x !== c) : [...atuais, c];
+      return `<button class="btn-mini${tem ? " aprovar" : ""}" aria-pressed="${tem}" data-fn="argos_definir_contratos" data-alvo="${esc(a.user_id)}" data-contratos="${esc(novos.join(","))}" title="${tem ? "Tirar" : "Liberar"} o painel ${esc(NOMES_CONTRATO[c])}">${tem ? "✓ " : ""}${esc(NOMES_CONTRATO[c])}</button>`;
+    }).join("")}</div>`;
+  } },
   { id: "solicitado", rotulo: "Pediu acesso", valor: (a) => a.solicitado_em, html: (a, agora) => `<span class="secundario">${esc(haQuanto(data(a.solicitado_em), agora))}</span>` },
   { id: "ultimo", rotulo: "Último acesso", valor: (a) => a.ultimo_acesso_em, html: (a, agora) => `<span class="secundario">${esc(a.ultimo_acesso_em ? haQuanto(data(a.ultimo_acesso_em), agora) : "nunca")}</span>` },
   { id: "acoes", rotulo: "Ações", valor: null, cheio: true, html: (a) => {
     const id = esc(a.user_id);
     const eu = a.user_id === estado.acesso?.user_id;
     const b = [];
+    if (a.super_admin) return `<span class="fraco">—</span>`;  // ninguém altera o administrador geral
     if (a.status !== "aprovado") b.push(`<button class="btn-mini aprovar" data-fn="argos_definir_status" data-alvo="${id}" data-valor="aprovado">Aprovar</button>`);
     if (a.status === "pendente") b.push(`<button class="btn-mini recusar" data-fn="argos_definir_status" data-alvo="${id}" data-valor="recusado">Recusar</button>`);
     if (a.status === "aprovado" && !eu) b.push(`<button class="btn-mini recusar" data-fn="argos_definir_status" data-alvo="${id}" data-valor="recusado" data-confirmar="Revogar o acesso de ${esc(a.email)}?">Revogar</button>`);
@@ -549,6 +656,8 @@ COLUNAS.acessos = [
       b.push(`<button class="btn-mini recusar" data-conta-equipe="excluir" data-alvo="${id}" data-nome="${eq}" data-confirmar="Excluir a conta da equipe ${eq}? O código fica livre para um novo cadastro.">Excluir conta</button>`);
       return `<div class="acoes-linha">${b.join("")}</div>`;
     }
+    // Promover/rebaixar admins: só o administrador geral.
+    if (!ehSuperAdmin()) return `<div class="acoes-linha">${b.join("")}</div>`;
     if (a.status === "aprovado" && a.papel !== "admin") b.push(`<button class="btn-mini" data-fn="argos_definir_papel" data-alvo="${id}" data-valor="admin" data-confirmar="Tornar ${esc(a.email)} administrador?">Tornar admin</button>`);
     if (a.papel === "admin") b.push(`<button class="btn-mini" data-fn="argos_definir_papel" data-alvo="${id}" data-valor="usuario" data-confirmar="${eu ? "Deixar de ser administrador? Você perde o acesso a esta aba." : `Remover ${esc(a.email)} dos administradores?`}">Remover admin</button>`);
     return `<div class="acoes-linha">${b.join("")}</div>`;
@@ -561,6 +670,9 @@ function agruparPorEquipe(campo, finalizadasHoje = []) {
     if (!grupos.has(k)) grupos.set(k, { equipe: k, total: 0, vencidas: 0, ate60: 0, finalizadas: 0, _min: null, dist: {} });
     return grupos.get(k);
   };
+  const nomes = new Map();
+  for (const r of [...campo, ...finalizadasHoje]) if (r.equipe_nome) nomes.set(r.equipe, r.equipe_nome);
+  for (const c of estado.equipesResumo) if (c.nome && !nomes.has(c.equipe)) nomes.set(c.equipe, c.nome);
   for (const r of finalizadasHoje) grupo(r.equipe || "").finalizadas++;
   for (const c of estado.equipesResumo) if (c.pendentes) grupo(c.equipe);
   for (const r of campo) {
@@ -574,7 +686,8 @@ function agruparPorEquipe(campo, finalizadasHoje = []) {
   // Equipe com vencida em aberto fica vermelha mesmo que a próxima ainda esteja no prazo.
   const contas = new Map(estado.equipesResumo.map((c) => [normEquipe(c.equipe), c]));
   return [...grupos.values()].map((g) => ({
-    ...g, conta: contas.get(normEquipe(g.equipe)) || null, _urg: g.vencidas ? "vencida" : classificar(g._min),
+    ...g, nome: nomes.get(g.equipe) || null,
+    conta: contas.get(normEquipe(g.equipe)) || null, _urg: g.vencidas ? "vencida" : classificar(g._min),
   }));
 }
 
@@ -586,13 +699,14 @@ function filtrar(linhas, aba = estado.aba) {
       if (estado.equipe && (r.equipe || "") !== estado.equipe) return false;
       if (aba !== "avisos" && estado.bairro && (r.bairro || "") !== estado.bairro) return false;
     }
+    if (multiCo() && ABAS_COM_CO.has(aba) && estado.co && (r.co || "") !== estado.co) return false;
     if (aba === "avisos") {
       if (estado.statusAviso && r.status !== estado.statusAviso) return false;
     } else if (aba === "finalizadas") {
       if (estado.periodo === "hoje" && !finalizadaHoje(r, agora)) return false;
     } else if (estado.urg && !FILTRO_URGENCIA[estado.urg](r._min)) return false;
     if (termo) {
-      const alvo = [r.ordem, r.tdc, r.cliente, r.equipe, r.bairro, r.tipo, r.endereco, r.nome_cliente, r.resultado, r.titulo].join(" ").toLowerCase();
+      const alvo = [r.ordem, r.tdc, r.cliente, r.equipe, r.equipe_nome, r.co, r.bairro, r.tipo, r.endereco, r.nome_cliente, r.resultado, r.titulo].join(" ").toLowerCase();
       if (!alvo.includes(termo)) return false;
     }
     return true;
@@ -627,11 +741,11 @@ function linhasDaAba(campo, programaveis, finalizadas, aba = estado.aba) {
     const agora = new Date();
     linhas = agruparPorEquipe(campo, finalizadas.filter((r) => finalizadaHoje(r, agora)));
   }
-  return ordenar(linhas, COLUNAS[aba], aba);
+  return ordenar(linhas, colunasDa(aba), aba);
 }
 
 function renderTabela(campo, programaveis, finalizadas, agora) {
-  const colunas = COLUNAS[estado.aba];
+  const colunas = colunasDa(estado.aba);
   const linhas = linhasDaAba(campo, programaveis, finalizadas);
 
   const { col, dir } = estado.ordem[estado.aba];
@@ -712,11 +826,12 @@ function dataBrasilia(d) {
 // "urgencia" pinta a célula com a cor da situação.
 const COLUNAS_RELATORIO = {
   campo: [
+    ["CO", (r) => nomeCo(r.co), "co"],
     ["Ordem", (r) => r.ordem],
     ["TdC", (r) => r.tdc],
     ["Cliente", (r) => r.cliente],
     ["Nome do cliente", (r) => r.nome_cliente],
-    ["Equipe", (r) => r.equipe],
+    ["Equipe", (r) => nomeEquipe(r)],
     ["Bairro", (r) => r.bairro],
     ["Endereço", (r) => r.endereco],
     ["Tipo", (r) => r.tipo],
@@ -725,6 +840,7 @@ const COLUNAS_RELATORIO = {
     ["Situação", (r) => NOME_URGENCIA[r._urg], "urgencia"],
   ],
   programaveis: [
+    ["CO", (r) => nomeCo(r.co), "co"],
     ["TdC", (r) => r.tdc],
     ["Ordem", (r) => r.ordem],
     ["Cliente", (r) => r.cliente],
@@ -737,11 +853,12 @@ const COLUNAS_RELATORIO = {
     ["Entrou no painel", (r) => dataBrasilia(data(r.primeiro_visto_em)), "data"],
   ],
   finalizadas: [
+    ["CO", (r) => nomeCo(r.co), "co"],
     ["Ordem", (r) => r.ordem],
     ["TdC", (r) => r.tdc],
     ["Cliente", (r) => r.cliente],
     ["Nome do cliente", (r) => r.nome_cliente],
-    ["Equipe", (r) => r.equipe],
+    ["Equipe", (r) => nomeEquipe(r)],
     ["Bairro", (r) => r.bairro],
     ["Endereço", (r) => r.endereco],
     ["Tipo", (r) => r.tipo],
@@ -782,6 +899,7 @@ function descreverFiltros(aba) {
   if (aba === "finalizadas") f.push(estado.periodo === "hoje" ? "finalizadas hoje" : "período da extração");
   else if (aba === "avisos") { if (estado.statusAviso) f.push(`status ${estado.statusAviso}`); }
   else if (estado.urg) f.push($(`#filtro-urgencia [data-urg="${estado.urg}"]`)?.textContent || estado.urg);
+  if (multiCo() && ABAS_COM_CO.has(aba) && estado.co) f.push(`CO ${nomeCo(estado.co)}`);
   if (ABAS_COM_EQUIPE.has(aba) && estado.equipe) f.push(`equipe ${estado.equipe}`);
   if (ABAS_COM_EQUIPE.has(aba) && aba !== "avisos" && estado.bairro) f.push(`bairro ${estado.bairro}`);
   return f.length ? `Filtros: ${f.join(", ")}` : "Sem filtros";
@@ -875,14 +993,15 @@ async function exportarRelatorio() {
     for (const [aba, nome, titulo] of abas) {
       const linhas = linhasDaAba(campo, programaveis, finalizadas, aba);
       const resumo = `Gerado em ${geradoEm} · ${linhas.length} ${linhas.length === 1 ? "ordem" : "ordens"} · ${descreverFiltros(aba)}`;
-      abaPlanilha(wb, nome, titulo, resumo, COLUNAS_RELATORIO[aba], linhas);
+      const colunas = COLUNAS_RELATORIO[aba].filter(([, , tipo]) => tipo !== "co" || multiCo());
+      abaPlanilha(wb, nome, `${titulo} · ${NOMES_CONTRATO[estado.contrato]}`, resumo, colunas, linhas);
     }
     const buffer = await wb.xlsx.writeBuffer();
     // ":" não pode em nome de arquivo no Windows, então a hora vai como 14h30.
     const p = partesData(agora);
     baixarArquivo(
       new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-      `Religas - ${p.day}-${p.month}-${p.year} ${p.hour}h${p.minute}.xlsx`,
+      `Religas ${estado.contrato === "negociacao" ? "Negociação" : "SOC"} - ${p.day}-${p.month}-${p.year} ${p.hour}h${p.minute}.xlsx`,
     );
   } catch (e) {
     alert(`Não foi possível gerar o relatório: ${e.message || e}`);
@@ -911,6 +1030,7 @@ $("#kpis").addEventListener("click", (ev) => {
   if (aba === "avisos") estado.statusAviso = "pendente";
   estado.equipe = "";
   estado.bairro = "";
+  estado.co = "";
   trocarAba(aba);
 });
 
@@ -935,8 +1055,10 @@ $("#tabela-corpo").addEventListener("click", async (ev) => {
   if (acao) {
     if (acao.dataset.confirmar && !confirm(acao.dataset.confirmar)) return;
     acao.disabled = true;
-    const campoValor = acao.dataset.fn === "argos_definir_status" ? "p_status" : "p_papel";
-    await acaoAcesso(acao.dataset.fn, { p_alvo: acao.dataset.alvo, [campoValor]: acao.dataset.valor });
+    const params = { p_alvo: acao.dataset.alvo };
+    if (acao.dataset.fn === "argos_definir_contratos") params.p_contratos = acao.dataset.contratos.split(",").filter(Boolean);
+    else params[acao.dataset.fn === "argos_definir_status" ? "p_status" : "p_papel"] = acao.dataset.valor;
+    await acaoAcesso(acao.dataset.fn, params);
     return;
   }
   const b = ev.target.closest("[data-equipe]");
@@ -949,6 +1071,11 @@ $("#tabela-corpo").addEventListener("click", async (ev) => {
 $("#filtro-texto").addEventListener("input", (ev) => { estado.texto = ev.target.value; renderizar(); });
 $("#filtro-equipe").addEventListener("change", (ev) => { estado.equipe = ev.target.value; renderizar(); });
 $("#filtro-bairro").addEventListener("change", (ev) => { estado.bairro = ev.target.value; renderizar(); });
+$("#filtro-co").addEventListener("change", (ev) => { estado.co = ev.target.value; renderizar(); });
+$("#seletor-contrato").addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-contrato]");
+  if (b) trocarContrato(b.dataset.contrato);
+});
 $("#filtro-urgencia").addEventListener("click", (ev) => {
   const c = ev.target.closest(".chip");
   if (!c) return;
@@ -981,6 +1108,12 @@ $("#btn-tema").addEventListener("click", () => {
     : window.matchMedia("(prefers-color-scheme: dark)").matches;
   raiz.dataset.theme = escuroAtual ? "light" : "dark";
   salvarPrefs();
+});
+
+// Toque num push com o painel já aberto (sw.js): mostra o contrato do aviso.
+navigator.serviceWorker?.addEventListener("message", (ev) => {
+  const contrato = ev.data?.tipo === "argos:contrato" ? ev.data.contrato : null;
+  if (contrato && contratosDe(estado.acesso).includes(contrato) && !$("#tela-painel").hidden) trocarContrato(contrato);
 });
 
 document.addEventListener("visibilitychange", () => {

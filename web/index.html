@@ -31,7 +31,7 @@
         <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
         <div>
           <strong>ARGOS</strong>
-          <small>Religações · Maricá</small>
+          <small>Religações</small>
         </div>
       </div>
       <label data-so-cadastro hidden>Nome
@@ -50,7 +50,7 @@
       <p id="login-erro" class="login-erro" role="alert"></p>
       <p id="login-dica" class="login-dica"></p>
       <button id="btn-alternar-cadastro" type="button" class="btn-link"></button>
-      <a class="btn-link link-equipe-login" href="/equipe">Sou equipe de campo (entrar com o código NI2)</a>
+      <a class="btn-link link-equipe-login" href="/equipe">Sou equipe de campo (entrar com o código da equipe)</a>
     </form>
   </main>
 
@@ -61,7 +61,7 @@
         <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
         <div>
           <strong>ARGOS</strong>
-          <small>Religações · Maricá</small>
+          <small>Religações</small>
         </div>
       </div>
       <h2 id="espera-titulo" class="espera-titulo"></h2>
@@ -79,9 +79,10 @@
         <svg class="simbolo" aria-hidden="true"><use href="#argos-simbolo"/></svg>
         <div>
           <strong>ARGOS</strong>
-          <small>Religações · Maricá</small>
+          <small id="subtitulo-painel">Religações</small>
         </div>
       </div>
+      <div class="chips seletor-contrato" id="seletor-contrato" role="group" aria-label="Painel do contrato" hidden></div>
       <div class="status" id="status"></div>
       <div class="acoes-topo">
         <button id="btn-atualizar" class="btn-icone" title="Atualizar agora" aria-label="Atualizar agora">
@@ -118,6 +119,7 @@
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <input id="filtro-texto" type="search" placeholder="Buscar ordem, TdC, cliente, endereço…">
       </div>
+      <select id="filtro-co" aria-label="Filtrar por centro operativo" hidden><option value="">Todos os COs</option></select>
       <select id="filtro-equipe" aria-label="Filtrar por equipe"><option value="">Todas as equipes</option></select>
       <select id="filtro-bairro" aria-label="Filtrar por bairro"><option value="">Todos os bairros</option></select>
       <div class="chips" id="filtro-urgencia" role="group" aria-label="Filtrar por urgência">

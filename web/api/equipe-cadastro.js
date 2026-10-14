@@ -1,10 +1,10 @@
-// Cadastro de uma equipe de campo (código NI2... + senha).
+// Cadastro de uma equipe de campo (contrato + código + senha).
 //
 // Cria a conta no Supabase Auth pela service role, já confirmada, com o
-// código em app_metadata.equipe (o usuário não consegue alterar esse campo,
-// então ninguém vira "equipe" por um cadastro comum). A conta nasce pendente
+// código e o contrato em app_metadata (o usuário não consegue alterar esse
+// campo, então ninguém vira "equipe" por um cadastro comum). A conta nasce pendente
 // em argos_acessos no primeiro login e precisa da aprovação de um admin.
-import { authAdmin, codigoValido, emailDaEquipe, faltandoEnv, lerCorpo, normalizarCodigo } from "./_equipes.js";
+import { CONTRATOS, authAdmin, codigoValido, emailDaEquipe, faltandoEnv, lerCorpo, normalizarCodigo } from "./_equipes.js";
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -16,10 +16,17 @@ export default async function handler(req, res) {
     return res.status(500).json({ erro: `Variáveis não configuradas no Vercel: ${faltando.join(", ")}.` });
   }
 
-  const { codigo, senha } = lerCorpo(req);
-  const equipe = normalizarCodigo(codigo);
-  if (!codigoValido(equipe)) {
-    return res.status(400).json({ erro: "Código de equipe inválido. Use o código que começa com NI2." });
+  const { codigo, senha, contrato = "soc" } = lerCorpo(req);
+  if (!CONTRATOS.includes(contrato)) {
+    return res.status(400).json({ erro: "Contrato inválido." });
+  }
+  const equipe = normalizarCodigo(codigo, contrato);
+  if (!codigoValido(equipe, contrato)) {
+    return res.status(400).json({
+      erro: contrato === "negociacao"
+        ? "Código de equipe inválido. Use o código passado pela coordenação."
+        : "Código de equipe inválido. Use o código que começa com NI2.",
+    });
   }
   if (typeof senha !== "string" || senha.length < 8) {
     return res.status(400).json({ erro: "A senha precisa ter pelo menos 8 caracteres." });
@@ -28,10 +35,10 @@ export default async function handler(req, res) {
   const r = await authAdmin("users", {
     method: "POST",
     body: {
-      email: emailDaEquipe(equipe),
+      email: emailDaEquipe(equipe, contrato),
       password: senha,
       email_confirm: true,
-      app_metadata: { equipe },
+      app_metadata: { equipe, contrato },
       user_metadata: { nome: equipe },
     },
   });
