@@ -93,11 +93,20 @@ def limpar_downloads():
             pass
 
 
-def abrir_busca_tdc(driver):
+def _clicar_item_lista_tdc(driver, xpath_item):
+    """Item do submenu "Lista TdC". O "Lista TdC" abre e fecha o submenu a
+    cada clique: só clica nele se o item não estiver visível."""
     try:
+        esperar_e_clicar_visivel(driver, xpath_item, timeout=3, via_js=True)
+    except TimeoutException:
         clicar_primeiro_disponivel(driver, XPATHS_MENU_LISTA_TDC, timeout=45)
         time.sleep(2)
-        esperar_e_clicar_visivel(driver, XPATH_BUSCA_TDC, timeout=45, via_js=True)
+        esperar_e_clicar_visivel(driver, xpath_item, timeout=45, via_js=True)
+
+
+def abrir_busca_tdc(driver):
+    try:
+        _clicar_item_lista_tdc(driver, XPATH_BUSCA_TDC)
         time.sleep(5)
     except Exception:
         debug_screenshot(driver, "busca_tdc_nao_abriu")
@@ -299,7 +308,7 @@ def selecionar_co(driver, co_nome: str):
 
 def abrir_lista_exportacao(driver):
     try:
-        esperar_e_clicar_visivel(driver, XPATH_LISTA_EXPORTACAO, timeout=45, via_js=True)
+        _clicar_item_lista_tdc(driver, XPATH_LISTA_EXPORTACAO)
         time.sleep(3)
     except Exception:
         debug_screenshot(driver, "lista_exportacao_nao_abriu")
@@ -418,6 +427,16 @@ def exportar_cos(driver, cos: list[str], progresso=_nada) -> dict[str, Path | Ex
     nomes: dict[str, str] = {}
     for i, co in enumerate(cos):
         nome = f"argos_campo_{agora:%Y%m%d_%H%M%S}_{i:02d}"
+        if i > 0:
+            # Cada CO parte do Menu Principal recarregado: reabrir pelo menu a
+            # Busca TdC já aberta (ou quebrada) não volta ao formulário limpo.
+            try:
+                login(driver)
+            except Exception as e_login:
+                log(f"Relogin para o próximo CO falhou: {e_login}", PREFIXO_LOG)
+                for resto in cos[i:]:
+                    resultado[resto] = e_login
+                break
         try:
             _solicitar_exportacao_do_co(driver, co, nome, inicio, agora, progresso)
             nomes[co] = nome
@@ -425,17 +444,10 @@ def exportar_cos(driver, cos: list[str], progresso=_nada) -> dict[str, Path | Ex
         except Exception as e:
             resultado[co] = e
             log(f"ERRO ao pedir a exportação de {co}: {str(e).splitlines()[0]}", PREFIXO_LOG)
-            # Recomeça do Menu Principal para o próximo CO não herdar a tela
-            # quebrada. Ainda não há planilha baixada para o login apagar.
-            try:
-                login(driver)
-            except Exception as e_login:
-                log(f"Relogin após a falha também falhou: {e_login}", PREFIXO_LOG)
-                for resto in cos[i + 1:]:
-                    resultado[resto] = e_login
-                break
 
     if nomes:
+        if len(cos) > 1:
+            login(driver)
         abrir_lista_exportacao(driver)
     for co, nome in nomes.items():
         try:
