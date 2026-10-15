@@ -73,8 +73,7 @@ def navegar_ate_atividades_programaveis(driver, co_value: str | None = None):
     #    busca termina de carregar é que a faixa de abas superiores aparece
     #    ("Plano Diário | Clipboard | Atividades Programáveis | ...").
     try:
-        centro_el = encontrar_elemento_visivel(driver, By.NAME, "_lyAUTEID_AFIL", timeout=config.WAIT_TIMEOUT)
-        Select(centro_el).select_by_value(co_value or config.CENTRO_OPERATIVO_VALUE)
+        _selecionar(driver, "_lyAUTEID_AFIL", co_value or config.CENTRO_OPERATIVO_VALUE)
         # O GWT recarrega o painel após trocar o centro; clicar em "Busca"
         # antes disso faz o clique se perder (testado: 1s não bastava).
         time.sleep(3)
@@ -102,6 +101,21 @@ def navegar_ate_atividades_programaveis(driver, co_value: str | None = None):
     time.sleep(1)
 
 
+def _selecionar(driver, nome, valor, timeout=config.WAIT_TIMEOUT):
+    """Escolhe `valor` no select visível `nome`, tentando de novo se o GWT
+    recriar o select entre achar e escolher (stale element)."""
+    fim = time.time() + timeout
+    while True:
+        try:
+            campo = encontrar_elemento_visivel(driver, By.NAME, nome, timeout=max(1, fim - time.time()))
+            Select(campo).select_by_value(valor)
+            return
+        except StaleElementReferenceException:
+            if time.time() >= fim:
+                raise
+            time.sleep(1)
+
+
 def _digitar(driver, nome, texto, timeout=20):
     """Limpa e preenche o campo visível `nome`, tentando de novo enquanto o
     GWT ainda o recria ("not interactable" / stale)."""
@@ -121,8 +135,7 @@ def _digitar(driver, nome, texto, timeout=20):
 def preencher_busca(driver, prazo_final: datetime, busca_value: str | None = None):
     # Busca salva — encontrar_elemento_visivel porque o GWT mantém campos de
     # OUTRAS abas escondidos no DOM com o mesmo `name`.
-    select_el = encontrar_elemento_visivel(driver, By.NAME, "_lyXWFMARSAID", timeout=config.WAIT_TIMEOUT)
-    Select(select_el).select_by_value(busca_value or config.SAVED_SEARCH_VALUE)
+    _selecionar(driver, "_lyXWFMARSAID", busca_value or config.SAVED_SEARCH_VALUE)
 
     # Selecionar a busca salva recarrega o formulário com os critérios dela;
     # antes disso os campos aparecem mas não aceitam digitação.
