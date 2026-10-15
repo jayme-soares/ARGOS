@@ -105,6 +105,21 @@ class TestPlanilha(unittest.TestCase):
         self.assertEqual(dados["estados"]["Enviado ao Campo"], 1)
         self.assertEqual([r["tdc"] for r in ler_religas_em_campo(caminho)], ["1001"])
 
+    def test_tipo_vem_do_tipo_tdc(self):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "TdC"
+        ws.append(["Código TdC", "Numero de Serviço", "Tipo TdC", "Tipo de Serviço", "Código Cliente", "Município",
+                   "Bairro", "Código Equipe", "Prazo ANS Legal"])
+        ws.append([1001, "A1", "Religação", "OUTREA", 1, "MARICA", "Centro", "NI201LRP-B", "30/09/2026 12:00"])
+        ws.append([1002, "A2", "", "OUTREL", 2, "MARICA", "Centro", "NI201LRP-B", "30/09/2026 13:00"])
+        caminho = self.dir / "export.xlsx"
+        wb.save(caminho)
+        primeiro, segundo = ler_religas_em_campo(caminho)
+        self.assertEqual((primeiro["tipo"], primeiro["tipo_servico"]), ("Religação", "OUTREA"))
+        self.assertNotIn("tipo_tdc", primeiro)
+        self.assertEqual(segundo["tipo"], "OUTREL")  # sem Tipo TdC, fica o Tipo de Serviço
+
     def test_coluna_faltando_explica(self):
         wb = Workbook()
         wb.active.append(["Código TdC", "Código Equipe"])

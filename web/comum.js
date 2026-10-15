@@ -193,7 +193,7 @@ function itemProximoVencimento(campo, agora) {
   const cor = proxima ? `style="--cor: var(--${proxima._urg})"` : "";
   const valor = proxima ? `<span data-contagem-ate="${proxima._venc.getTime()}">${cronometro(proxima._venc - agora)}</span>` : "—";
   const detalhe = proxima
-    ? `vence ${diaHora(proxima._venc)} · TdC ${proxima.tdc} · ${proxima.equipe || "sem equipe"}`
+    ? `vence ${diaHora(proxima._venc)} · TdC ${proxima.tdc} · ${proxima.equipe_nome || proxima.equipe || "sem equipe"}`
     : "nenhuma ordem no prazo";
   return `
     <div class="extracao-item extracao-vencimento" ${cor}>

@@ -156,6 +156,7 @@ class MonitorProgramaveis(threading.Thread):
         anteriores = (estado_anterior or {}).get("registros", {})
 
         registros, quantidade, parcial, falhas = [], 0, False, []
+        total_por_co: dict[str, int] = {}
         for co in self.cos:
             try:
                 regs, total, co_parcial = self._ler_co(driver, co, prazo)
@@ -173,6 +174,7 @@ class MonitorProgramaveis(threading.Thread):
                 total, co_parcial = len(regs), True
             registros += regs
             quantidade += total
+            total_por_co[co.nome] = total
             parcial = parcial or co_parcial
         if falhas and len(falhas) == len(self.cos):
             raise RuntimeError(f"Nenhum CO foi lido ({', '.join(falhas)}).")
@@ -193,6 +195,8 @@ class MonitorProgramaveis(threading.Thread):
         publicador.atualizar_secao("programaveis", {
             "atualizado_em": agora.isoformat(timespec="seconds"),
             "total": quantidade,
+            # O painel da Negociação filtra os indicadores por CO.
+            "total_por_co": total_por_co,
             "cos_com_erro": falhas,
             "registros": [
                 {

@@ -103,6 +103,11 @@
 
     <div id="avisos" class="avisos"></div>
 
+    <section class="filtro-cos" id="filtro-cos" hidden>
+      <span class="filtro-cos-rotulo">Centros operativos</span>
+      <div class="chips" id="filtro-cos-chips" role="group" aria-label="Filtrar o painel por centro operativo (vários permitidos)"></div>
+    </section>
+
     <section class="kpis" id="kpis" aria-label="Indicadores"></section>
 
     <nav class="abas" role="tablist">
@@ -119,7 +124,6 @@
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <input id="filtro-texto" type="search" placeholder="Buscar ordem, TdC, cliente, endereço…">
       </div>
-      <select id="filtro-co" aria-label="Filtrar por centro operativo" hidden><option value="">Todos os COs</option></select>
       <select id="filtro-equipe" aria-label="Filtrar por equipe"><option value="">Todas as equipes</option></select>
       <select id="filtro-bairro" aria-label="Filtrar por bairro"><option value="">Todos os bairros</option></select>
       <div class="chips" id="filtro-urgencia" role="group" aria-label="Filtrar por urgência">
