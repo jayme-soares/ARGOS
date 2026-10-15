@@ -23,7 +23,7 @@ from openpyxl import load_workbook
 # Os exports do eOrder vêm sem estilo padrão; o openpyxl avisa a cada leitura.
 warnings.filterwarnings("ignore", message="Workbook contains no default style")
 
-from argos import config
+from argos import composicao, config
 from argos.contratos import POR_ID, SOC, Contrato
 from argos.eorder.ui import normalizar_texto
 
@@ -337,8 +337,9 @@ def ler_exportacao_campo(caminho: Path | str, contrato: Contrato = SOC, co: str 
     - estados: contagem de TdCs por "Estado TdC" na planilha inteira, antes
       do filtro de escopo (para descobrir os nomes dos estados).
 
-    Na Negociação, `equipe` vira o slug do nome (chave da conta /equipe e dos
-    avisos) e o nome original fica em `equipe_nome`. Com `co`, cada registro
+    Na Negociação, `equipe` vira a matrícula (ver argos/composicao.py) ou,
+    sem casamento, o slug do nome: é a chave da conta /equipe e dos avisos.
+    O nome original fica em `equipe_nome`. Com `co`, cada registro
     leva o Centro Operativo da exportação.
 
     Datas saem em ISO 8601 com fuso, prontas para o JSON do painel."""
@@ -370,7 +371,8 @@ def ler_exportacao_campo(caminho: Path | str, contrato: Contrato = SOC, co: str 
             registro["tipo"] = ciclo
         if contrato.equipe_por_nome:
             registro["equipe_nome"] = registro["equipe"]
-            registro["equipe"] = contrato.chave_equipe(registro["equipe"])
+            registro["equipe"] = (composicao.matricula_do_nome(registro["equipe"])
+                                  or contrato.chave_equipe(registro["equipe"]))
         if co:
             registro["co"] = co
         if not _eh_finalizada(estado_tdc):

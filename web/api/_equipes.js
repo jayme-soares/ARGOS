@@ -3,20 +3,19 @@
 
 // As equipes entram com o código e a senha; o Supabase exige e-mail, então
 // cada conta usa um e-mail sintético neste domínio. SOC: <código>@domínio
-// (código NI2...). Negociação: neg-<código>@domínio, com o código derivado do
-// nome da equipe (slugEquipe, igual a slug_equipe em argos/contratos.py).
+// (código NI2...). Negociação: neg-<matrícula>@domínio, com a matrícula da
+// planilha Composição Fixa (igual a argos/composicao.py).
 export const DOMINIO_EQUIPES = process.env.ARGOS_DOMINIO_EQUIPES || "equipes.argos.local";
 
 export const CONTRATOS = ["soc", "negociacao"];
 
-export const slugEquipe = (nome) => String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-  .toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+export const normalizarMatricula = (m) => String(m || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
 
 export const normalizarCodigo = (codigo, contrato = "soc") =>
-  (contrato === "negociacao" ? slugEquipe(codigo) : String(codigo || "").replace(/\s+/g, "").toUpperCase());
+  (contrato === "negociacao" ? normalizarMatricula(codigo) : String(codigo || "").replace(/\s+/g, "").toUpperCase());
 
 export const codigoValido = (codigo, contrato = "soc") =>
-  (contrato === "negociacao" ? /^[A-Z0-9][A-Z0-9-]{1,59}$/ : /^NI2[A-Z0-9-]{2,30}$/).test(codigo);
+  (contrato === "negociacao" ? /^[1-9][0-9]{2,9}$/ : /^NI2[A-Z0-9-]{2,30}$/).test(codigo);
 
 export const emailDaEquipe = (codigo, contrato = "soc") =>
   `${contrato === "negociacao" ? "neg-" : ""}${normalizarCodigo(codigo, contrato).toLowerCase()}@${DOMINIO_EQUIPES}`;

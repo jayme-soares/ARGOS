@@ -3,10 +3,14 @@
 As equipes saem do estado do bot do contrato: snapshot.json (ordens em
 aberto e finalizadas dos últimos dias) e designacoes.json (equipe de cada
 ordem na última exportação), mais os códigos passados na linha de comando.
-Na SOC só entram códigos com o prefixo ARGOS_PREFIXO_EQUIPE_CAMPO. Na
-Negociação o código é o nome da coluna "Equipe" em forma de slug
-("Ceneged Angra 01" -> CENEGED-ANGRA-01); a lista impressa mostra o nome e o
-código, que é o que a equipe digita no login.
+Na SOC só entram códigos com o prefixo ARGOS_PREFIXO_EQUIPE_CAMPO.
+
+Na Negociação as contas saem da planilha Composição Fixa (ver
+argos/composicao.py): uma por matrícula, que é o que a pessoa digita no
+login. Sem --planilha, usa a cópia que o bot lê
+(/data/negociacao/composicao.xlsx). A lista também mostra as equipes do
+eOrder (estado do bot) que não casaram com ninguém da planilha: essas não
+recebem avisos até o nome ser corrigido na planilha.
 
 Cada conta é criada como em web/api/equipe-cadastro.js (e-mail interno
 <código>@ARGOS_DOMINIO_EQUIPES na SOC e neg-<código>@... na Negociação,
@@ -21,7 +25,9 @@ nesta execução:
         python -m argos.contas_equipes --senha 'Senha01#'            (só lista)
     docker compose run --rm -e SUPABASE_SERVICE_ROLE_KEY=... argos \\
         python -m argos.contas_equipes --senha 'Senha01#' --confirmar
-    (Negociação: acrescente --contrato negociacao)
+    Negociação, com a planilha copiada para dentro do container:
+    docker compose cp "Composição Fixa.xlsx" argos:/data/negociacao/composicao.xlsx
+    docker compose exec -e SUPABASE_SERVICE_ROLE_KEY=... argos         python -m argos.contas_equipes --contrato negociacao --senha 'Senha01#'
 """
 
 import argparse
@@ -32,9 +38,9 @@ from datetime import datetime, timezone
 
 import requests
 
-from argos import config
+from argos import composicao, config
 from argos.avisos_equipe import ARQUIVO_DESIGNACOES, normalizar_equipe
-from argos.contratos import POR_ID, SOC, Contrato
+from argos.contratos import NEGOCIACAO, POR_ID, SOC, Contrato
 from argos.estado import carregar_json
 from argos.publicador import ARQUIVO_SNAPSHOT
 
@@ -45,7 +51,7 @@ DOMINIO_EQUIPES = os.environ.get("ARGOS_DOMINIO_EQUIPES") or "equipes.argos.loca
 def codigo_valido(codigo: str, contrato: Contrato = SOC) -> bool:
     """Igual a codigoValido() em web/api/_equipes.js."""
     if contrato.equipe_por_nome:
-        return bool(re.fullmatch(r"[A-Z0-9][A-Z0-9-]{1,59}", codigo))
+        return bool(re.fullmatch(r"[1-9][0-9]{2,9}", codigo))
     return bool(re.fullmatch(r"NI2[A-Z0-9-]{2,30}", codigo)) and codigo.startswith(config.PREFIXO_EQUIPE_CAMPO.upper())
 
 
@@ -55,8 +61,8 @@ def email_da_equipe(codigo: str, contrato: Contrato = SOC) -> str:
     return f"{prefixo}{codigo.lower()}@{DOMINIO_EQUIPES}"
 
 
-def equipes_conhecidas(extras: list[str], contrato: Contrato = SOC) -> dict[str, str]:
-    """{código: nome} das equipes do contrato."""
+def equipes_do_estado(contrato: Contrato) -> dict[str, str]:
+    """{chave: nome do eOrder} das equipes que o bot já viu no contrato."""
     snapshot = carregar_json(contrato.arquivo(ARQUIVO_SNAPSHOT)) or {}
     campo = snapshot.get("campo") or {}
     secoes = [campo.get("registros"), campo.get("finalizadas"), (snapshot.get("programaveis") or {}).get("registros")]
@@ -64,7 +70,27 @@ def equipes_conhecidas(extras: list[str], contrato: Contrato = SOC) -> dict[str,
     for secao in secoes:
         for r in secao or []:
             codigo = normalizar_equipe(r.get("equipe"))
-            nomes.setdefault(codigo, r.get("equipe_nome") or codigo)
+            if codigo:
+                nomes.setdefault(codigo, r.get("equipe_nome") or codigo)
+    return nomes
+
+
+def equipes_da_planilha(caminho, extras: list[str]) -> tuple[dict[str, str], list[str]]:
+    """({matrícula: nome}, nomes do eOrder sem matrícula) da Negociação."""
+    cadastro = composicao.ler_planilha(caminho)
+    nomes = {m: p["nome"] for m, p in cadastro.items()}
+    for e in extras:
+        m = composicao.normalizar_matricula(e)
+        if m in cadastro:
+            nomes[m] = cadastro[m]["nome"]
+    sem_matricula = sorted({nome for nome in equipes_do_estado(NEGOCIACAO).values()
+                            if not composicao.matricula_do_nome(nome, cadastro)})
+    return {m: nomes[m] for m in sorted(nomes, key=int) if codigo_valido(m, NEGOCIACAO)}, sem_matricula
+
+
+def equipes_conhecidas(extras: list[str], contrato: Contrato = SOC) -> dict[str, str]:
+    """{código: nome} das equipes do contrato."""
+    nomes = equipes_do_estado(contrato)
     for e in (carregar_json(contrato.arquivo(ARQUIVO_DESIGNACOES)) or {}).values():
         nomes.setdefault(normalizar_equipe(e), normalizar_equipe(e))
     for e in extras:
@@ -139,7 +165,8 @@ def main():
     p.add_argument("--confirmar", action="store_true", help="cria de fato (sem isto, só lista)")
     p.add_argument("--sem-troca", action="store_true", help="não obriga a trocar a senha no primeiro login")
     p.add_argument("--contrato", choices=sorted(POR_ID), default="soc")
-    p.add_argument("equipes", nargs="*", help="códigos (ou nomes, na Negociação) extras, além dos do estado do bot")
+    p.add_argument("--planilha", help="Negociação: planilha Composição Fixa (padrão: a cópia do bot em /data)")
+    p.add_argument("equipes", nargs="*", help="códigos extras (SOC), além dos do estado do bot")
     args = p.parse_args()
     contrato = POR_ID[args.contrato]
 
@@ -149,13 +176,24 @@ def main():
     if len(args.senha) < 8:
         sys.exit("A senha precisa ter pelo menos 8 caracteres.")
 
-    equipes = equipes_conhecidas(args.equipes, contrato)
+    sem_matricula = []
+    if contrato.equipe_por_nome:
+        planilha = args.planilha or composicao.caminho_padrao()
+        if not os.path.exists(planilha):
+            sys.exit(f"Planilha não encontrada: {planilha}. Passe --planilha ou copie para lá.")
+        equipes, sem_matricula = equipes_da_planilha(planilha, args.equipes)
+    else:
+        equipes = equipes_conhecidas(args.equipes, contrato)
     existentes = equipes_com_conta(chave, contrato)
     novas = [e for e in equipes if e not in existentes]
     print(f"[{contrato.nome}] {len(equipes)} equipe(s) conhecidas, {len(existentes & set(equipes))} já com conta, "
           f"{len(novas)} a criar:")
     for e in novas:
         print(f"  {e}" + (f"   ({equipes[e]})" if equipes[e] != e else ""))
+    if sem_matricula:
+        print(f"Equipes do eOrder sem matrícula na planilha ({len(sem_matricula)}), não recebem avisos:")
+        for nome in sem_matricula:
+            print(f"  {nome}")
     if not args.confirmar:
         print("Nada foi criado. Rode de novo com --confirmar.")
         return

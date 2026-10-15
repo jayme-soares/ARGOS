@@ -5,9 +5,8 @@
 // próprias religas: as em aberto, com contagem regressiva, e as finalizadas,
 // no prazo ou fora. O filtro por equipe é feito no servidor (/api/snapshot).
 //
-// Código da equipe: na SOC, o "Código Equipe" (NI2...); na Negociação, o
-// nome da equipe em forma de código (CENEGED-ANGRA-01), o mesmo que o bot
-// gera (argos/contratos.py, slug_equipe).
+// Código da equipe: na SOC, o "Código Equipe" (NI2...); na Negociação, a
+// matrícula da planilha Composição Fixa (argos/composicao.py).
 //
 // Avisos (religa designada, perto de vencer, vencida) chegam por push e
 // ficam pendentes em argos_avisos_equipe até a equipe confirmar: enquanto
@@ -34,23 +33,23 @@ function salvarPrefs() {
 }
 
 // Iguais a web/api/_equipes.js.
-const slugEquipe = (nome) => String(nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-  .toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+const normalizarMatricula = (m) => String(m || "").replace(/\D/g, "").replace(/^0+(?=\d)/, "");
 const normalizarCodigo = (c, contrato = estado.contratoLogin) =>
-  (contrato === "negociacao" ? slugEquipe(c) : String(c || "").replace(/\s+/g, "").toUpperCase());
+  (contrato === "negociacao" ? normalizarMatricula(c) : String(c || "").replace(/\s+/g, "").toUpperCase());
 const codigoValido = (c, contrato = estado.contratoLogin) =>
-  (contrato === "negociacao" ? /^[A-Z0-9][A-Z0-9-]{1,59}$/ : /^NI2[A-Z0-9-]{2,30}$/).test(c);
+  (contrato === "negociacao" ? /^[1-9][0-9]{2,9}$/ : /^NI2[A-Z0-9-]{2,30}$/).test(c);
 const emailDaEquipe = (codigo, contrato = estado.contratoLogin) =>
   `${contrato === "negociacao" ? "neg-" : ""}${normalizarCodigo(codigo, contrato).toLowerCase()}@${estado.cfg?.dominioEquipes || "equipes.argos.local"}`;
 const DICA_CODIGO = {
   soc: "o código da equipe (começa com NI2)",
-  negociacao: "o código da equipe (o nome da equipe, como CENEGED-ANGRA-01, passado pela coordenação)",
+  negociacao: "a sua matrícula",
 };
 
 function definirContratoLogin(contrato) {
   estado.contratoLogin = contrato;
   for (const b of $$("#login-contrato .chip")) b.setAttribute("aria-pressed", String(b.dataset.contrato === contrato));
-  $("#login-codigo").placeholder = contrato === "negociacao" ? "CENEGED-…" : "NI2…";
+  $("#login-codigo").placeholder = contrato === "negociacao" ? "Matrícula" : "NI2…";
+  $("#login-codigo").inputMode = contrato === "negociacao" ? "numeric" : "text";
   definirModoCadastro(modoCadastro);
   salvarPrefs();
 }
@@ -168,7 +167,7 @@ $("#form-login").addEventListener("submit", async (ev) => {
   const senha = $("#login-senha").value;
   if (!codigoValido(codigo)) {
     $("#login-erro").textContent = estado.contratoLogin === "negociacao"
-      ? "Código de equipe inválido. Use o código passado pela coordenação."
+      ? "Matrícula inválida. Digite só os números da sua matrícula."
       : "O código da equipe começa com NI2.";
     return;
   }
