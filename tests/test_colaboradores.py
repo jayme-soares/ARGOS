@@ -64,6 +64,7 @@ class TestColaboradores(unittest.TestCase):
         with mock.patch("argos.contas_equipes.registros_do_estado", return_value=[
             {"codigo_equipe": "077189", "equipe_nome": "MARCUS SILVA"},
             {"codigo_equipe": "083446", "equipe_nome": "ALBERTO MENDONÇA CARLOS"},
+            {"equipe_nome": "SNAPSHOT ANTIGO"},
         ]):
             equipes, avisos = equipes_da_planilha(self.xlsx)
         self.assertEqual(len(equipes), 9)
@@ -74,6 +75,8 @@ class TestColaboradores(unittest.TestCase):
         self.assertIn("código 077189 em mais de uma matrícula", texto)
         self.assertIn("equipe do eOrder sem matrícula: MARCUS SILVA", texto)
         self.assertNotIn("ALBERTO", texto)
+        self.assertNotIn("SNAPSHOT ANTIGO", texto)
+        self.assertIn("1 ordem(ns) no estado do bot sem Código Equipe", texto)
 
     def test_matricula_valida(self):
         self.assertEqual(colaboradores.normalizar_matricula(20045.0), "20045")

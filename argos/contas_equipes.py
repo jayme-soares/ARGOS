@@ -93,7 +93,15 @@ def equipes_da_planilha(caminho) -> tuple[dict[str, str], list[str]]:
     avisos += [f"código {cod.zfill(6)} em mais de uma matrícula: {', '.join(sorted(ms))}"
                for cod, ms in sorted(por_codigo.items()) if len(ms) > 1]
     vistos = set()
-    for r in registros_do_estado(NEGOCIACAO):
+    registros = registros_do_estado(NEGOCIACAO)
+    # Ordens gravadas antes de o bot guardar o código não dá para conferir.
+    antigos = sum(1 for r in registros if r.get("equipe_nome") and "codigo_equipe" not in r)
+    if antigos:
+        avisos.append(f"{antigos} ordem(ns) no estado do bot sem Código Equipe (gravadas antes da atualização): "
+                      "não conferidas; rode de novo depois da próxima exportação de campo")
+    for r in registros:
+        if "codigo_equipe" not in r:
+            continue
         chave = (r.get("codigo_equipe"), r.get("equipe_nome"))
         if chave in vistos or not chave[1]:
             continue
