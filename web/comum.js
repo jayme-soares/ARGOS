@@ -109,11 +109,18 @@ const FILTRO_URGENCIA = {
   atencao: (m) => m != null && m > 0 && m <= 120,
 };
 
+// O ciclo de trabalho às vezes diz onde a religação é feita:
+// "Ciclo 9 - Religação (Medidor)" -> "Medidor". Também Poste e Ramal.
+function localDoCiclo(tipo) {
+  const m = /\(([^()]*)\)[^()]*$/.exec(String(tipo || ""));
+  return m && /medidor|poste|ramal/i.test(m[1]) ? m[1].trim() : "";
+}
+
 function enriquecer(registros, agora) {
   return (registros || []).map((r) => {
     const venc = data(r.vencimento);
     const min = venc ? (venc - agora) / 60000 : null;
-    return { ...r, _venc: venc, _min: min, _urg: classificar(min) };
+    return { ...r, _venc: venc, _min: min, _urg: classificar(min), _local: localDoCiclo(r.tipo) };
   });
 }
 
@@ -124,7 +131,8 @@ function enriquecerFinalizadas(registros) {
     const venc = data(r.vencimento);
     const fim = data(r.finalizada_em);
     const folga = venc && fim ? (venc - fim) / 60000 : null;
-    return { ...r, _venc: venc, _fim: fim, _min: null, _folga: folga, _urg: r.no_prazo === true ? "ok" : r.no_prazo === false ? "vencida" : "sem" };
+    return { ...r, _venc: venc, _fim: fim, _min: null, _folga: folga, _local: localDoCiclo(r.tipo),
+      _urg: r.no_prazo === true ? "ok" : r.no_prazo === false ? "vencida" : "sem" };
   });
 }
 const finalizadaHoje = (r, agora) => r._fim && mesmoDia(r._fim, agora);
