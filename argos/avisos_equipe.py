@@ -2,7 +2,7 @@
 
 Cada equipe com conta aprovada no painel /equipe recebe push só das
 próprias ordens. Na SOC a equipe é o código NI2...; na Negociação, a
-matrícula da planilha Composição Fixa (ver argos/composicao.py). Contas, avisos
+matrícula da planilha Colaboradores (ver argos/colaboradores.py). Contas, avisos
 e base de designações são separados por contrato.
 - "designada": a religa apareceu na exportação para a equipe (nova ou
   redesignada de outra equipe);

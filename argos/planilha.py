@@ -23,7 +23,7 @@ from openpyxl import load_workbook
 # Os exports do eOrder vêm sem estilo padrão; o openpyxl avisa a cada leitura.
 warnings.filterwarnings("ignore", message="Workbook contains no default style")
 
-from argos import composicao, config
+from argos import colaboradores, config
 from argos.contratos import POR_ID, SOC, Contrato
 from argos.eorder.ui import normalizar_texto
 
@@ -219,7 +219,11 @@ def _mapear_colunas(df: pd.DataFrame, contrato: Contrato = SOC) -> dict[str, str
             f"Colunas obrigatórias ausentes na planilha: {faltando}. "
             f"Colunas disponíveis: {list(df.columns)}"
         )
-    for campo, nome in COLUNAS_OPCIONAIS.items():
+    opcionais = dict(COLUNAS_OPCIONAIS)
+    if contrato.equipe_por_nome:
+        # Na Negociação a equipe é o nome; o código leva à matrícula.
+        opcionais["codigo_equipe"] = "Código Equipe"
+    for campo, nome in opcionais.items():
         real = por_normalizado.get(normalizar_texto(nome))
         if real is not None:
             mapa[campo] = real
@@ -337,8 +341,9 @@ def ler_exportacao_campo(caminho: Path | str, contrato: Contrato = SOC, co: str 
     - estados: contagem de TdCs por "Estado TdC" na planilha inteira, antes
       do filtro de escopo (para descobrir os nomes dos estados).
 
-    Na Negociação, `equipe` vira a matrícula (ver argos/composicao.py) ou,
-    sem casamento, o slug do nome: é a chave da conta /equipe e dos avisos.
+    Na Negociação, `equipe` vira a matrícula, achada pelo "Código Equipe"
+    (ver argos/colaboradores.py), ou, sem ela, o slug do nome: é a chave da
+    conta /equipe e dos avisos.
     O nome original fica em `equipe_nome`. Com `co`, cada registro
     leva o Centro Operativo da exportação.
 
@@ -371,7 +376,7 @@ def ler_exportacao_campo(caminho: Path | str, contrato: Contrato = SOC, co: str 
             registro["tipo"] = ciclo
         if contrato.equipe_por_nome:
             registro["equipe_nome"] = registro["equipe"]
-            registro["equipe"] = (composicao.matricula_do_nome(registro["equipe"])
+            registro["equipe"] = (colaboradores.matricula(registro.get("codigo_equipe"), registro["equipe"])
                                   or contrato.chave_equipe(registro["equipe"]))
         if co:
             registro["co"] = co

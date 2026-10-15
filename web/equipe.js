@@ -6,7 +6,7 @@
 // no prazo ou fora. O filtro por equipe é feito no servidor (/api/snapshot).
 //
 // Código da equipe: na SOC, o "Código Equipe" (NI2...); na Negociação, a
-// matrícula da planilha Composição Fixa (argos/composicao.py).
+// matrícula da planilha Colaboradores (argos/colaboradores.py).
 //
 // Avisos (religa designada, perto de vencer, vencida) chegam por push e
 // ficam pendentes em argos_avisos_equipe até a equipe confirmar: enquanto

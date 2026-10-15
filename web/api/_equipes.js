@@ -4,7 +4,7 @@
 // As equipes entram com o código e a senha; o Supabase exige e-mail, então
 // cada conta usa um e-mail sintético neste domínio. SOC: <código>@domínio
 // (código NI2...). Negociação: neg-<matrícula>@domínio, com a matrícula da
-// planilha Composição Fixa (igual a argos/composicao.py).
+// planilha Colaboradores (igual a argos/colaboradores.py).
 export const DOMINIO_EQUIPES = process.env.ARGOS_DOMINIO_EQUIPES || "equipes.argos.local";
 
 export const CONTRATOS = ["soc", "negociacao"];

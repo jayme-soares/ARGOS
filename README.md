@@ -153,7 +153,7 @@ Para configurar:
 |---|---|---|
 | Programáveis | CO "Valtellina - Niterói", busca salva "CENEGED RELIGAÇÃO MARICA", só Maricá. Checagem a cada 1 min | Cada CO "Ceneged - X" com a própria busca salva (`ARGOS_NEG_PROGRAMAVEIS`). Um Chrome próprio percorre os COs em sequência, sem parar, e publica a cada volta completa |
 | Em campo | Busca TdC com o filtro salvo e o CO "Valtellina - Niterói". Só Maricá e `Código Equipe` `NI2...` | Mesmo filtro salvo, uma exportação por CO. Todas as equipes, identificadas pela coluna **`Equipe`** (o nome) |
-| Código no `/equipe` | `NI2...` | Matrícula da planilha Composição Fixa (ver [Equipes da Negociação](#equipes-da-negociação-matrícula)) |
+| Código no `/equipe` | `NI2...` | Matrícula da planilha Colaboradores (ver [Equipes da Negociação](#equipes-da-negociação-matrícula)) |
 | Snapshot no Upstash | `ARGOS_SNAPSHOT_KEY` (`argos:snapshot`) | `<ARGOS_SNAPSHOT_KEY>:negociacao` |
 | Estado em `/data` | raiz | `negociacao/` |
 | ntfy | `NTFY_TOPIC` | `NTFY_TOPIC_NEGOCIACAO` |
@@ -173,18 +173,22 @@ Os pushes da gestão vão só para quem tem acesso ao contrato. Na Negociação,
 2. No `.env` da VPS, preencha `ARGOS_NEG_PROGRAMAVEIS` com `value_do_CO:value_da_busca:nome` de cada CO, separados por `;` (por exemplo `140:52300:Angra;141:52301:Araruama`). Se os textos dos COs na Busca TdC forem diferentes do padrão, ajuste `ARGOS_NEG_COS_CAMPO`.
 3. Confira uma exportação: `python -m argos.eorder.busca_tdc --contrato negociacao --co "Ceneged - Angra (CENEGED_ANGRA)"`. O comando imprime as ordens lidas e as equipes pelo nome.
 4. Ligue com `ARGOS_NEGOCIACAO=1` e suba de novo (`docker compose up -d`).
-5. Copie a planilha Composição Fixa para o bot e crie as contas das equipes (ver [Equipes da Negociação](#equipes-da-negociação-matrícula)).
+5. Copie a planilha Colaboradores para o bot e crie as contas das equipes (ver [Equipes da Negociação](#equipes-da-negociação-matrícula)).
 
 ### Equipes da Negociação (matrícula)
 
-Na Negociação, cada equipe entra no `/equipe` com a **matrícula**. As matrículas vêm da aba **Base** da planilha Composição Fixa (colunas `Matrícula` e `Equipe`). O eOrder não traz a matrícula, só o nome na coluna `Equipe`, muitas vezes abreviado e com a ordem trocada ("ALBERTO MENDONÇA CARLOS" é CARLOS ALBERTO MENDONCA). Por isso, o bot procura na planilha quem tem **todas** as palavras do nome do eOrder e só aceita quando aparece **uma pessoa só**. Uma equipe sem correspondência fica com o nome como chave e não recebe avisos até o nome ser acertado na planilha.
+Na Negociação, cada equipe entra no `/equipe` com a **matrícula**. As matrículas vêm da planilha **Colaboradores**, nas colunas `REGIONAL`, `MATRÍCULA`, `Codigo Equipe`, `ACESSO EORDER` e `REFUN` (nome completo). O `Codigo Equipe` é o mesmo "Código Equipe" que aparece na exportação do eOrder. É por ele que o bot liga cada ordem à matrícula. Alguns casos especiais:
+- **Código com sufixo:** vale só a parte antes do `_` (`079471_653` vira `079471`).
+- **Linha repetida:** conta uma vez só.
+- **Mesmo código em mais de uma matrícula:** o bot desempata pelo nome que vem do eOrder. Se ainda ficar ambíguo, a ordem fica sem matrícula.
+- **Ordem sem matrícula:** fica com o nome como chave e não chega a nenhuma conta até a planilha ser corrigida. O `contas_equipes` lista esses casos.
 
-O bot lê a planilha em `/data/negociacao/composicao.xlsx` e relê sozinho quando o arquivo muda. Para mudar o caminho, use `ARGOS_NEG_COMPOSICAO`. Na VPS, na pasta do projeto:
+O bot lê a planilha em `/data/negociacao/colaboradores.xlsx` e relê sozinho quando o arquivo muda. Para mudar o caminho, use `ARGOS_NEG_COLABORADORES`. Na VPS, na pasta do projeto:
 
 ```bash
 # 1. copie a planilha para dentro do container (repita quando ela mudar)
-docker compose cp "Composição Fixa - ATUALIZADA.xlsx" argos:/data/negociacao/composicao.xlsx
-# 2. veja a lista (uma conta por matrícula + equipes do eOrder sem matrícula)
+docker compose cp Colaboradores.xlsx argos:/data/negociacao/colaboradores.xlsx
+# 2. veja a lista (uma conta por matrícula + o que impede ordens de chegar às contas)
 docker compose exec -e SUPABASE_SERVICE_ROLE_KEY='<service_role>' argos \
     python -m argos.contas_equipes --contrato negociacao --senha '<senha inicial>'
 # 3. crie: o mesmo comando com --confirmar no fim
@@ -223,7 +227,7 @@ Para configurar (uma vez):
 4. A VPS não precisa de variável nova. Basta atualizar o bot (`git pull` + `docker compose up -d --build`). Os avisos usam o mesmo Supabase e as mesmas chaves do Web Push.
 5. Teste: com uma equipe aprovada e o sino ativo no celular, rode na VPS `docker compose run --rm argos python -m argos.avisos_equipe --teste NI2XXXX`. O aviso de teste chega, bloqueia o painel da equipe até ela confirmar e aparece na aba **Avisos**.
 
-**Criar as contas de todas as equipes de uma vez** (em vez de cada equipe se cadastrar): na VPS, rode `docker compose run --rm -e SUPABASE_SERVICE_ROLE_KEY=<service_role> argos python -m argos.contas_equipes --senha '<senha inicial>'` para ver a lista e repita com `--confirmar` para criar. As equipes vêm do estado do bot (ordens em aberto, finalizadas recentes e designações). Códigos extras podem ir no fim do comando. As contas já nascem aprovadas e a equipe precisa trocar a senha no primeiro login (`--sem-troca` desliga isso). Equipes que já têm conta são puladas. Se `ARGOS_DOMINIO_EQUIPES` foi alterado no Vercel, passe o mesmo valor com `-e`. Na Negociação, as contas saem da planilha Composição Fixa, uma por matrícula (ver [Equipes da Negociação](#equipes-da-negociação-matrícula)). O aviso de teste também aceita `--contrato negociacao`.
+**Criar as contas de todas as equipes de uma vez** (em vez de cada equipe se cadastrar): na VPS, rode `docker compose run --rm -e SUPABASE_SERVICE_ROLE_KEY=<service_role> argos python -m argos.contas_equipes --senha '<senha inicial>'` para ver a lista e repita com `--confirmar` para criar. As equipes vêm do estado do bot (ordens em aberto, finalizadas recentes e designações). Códigos extras podem ir no fim do comando. As contas já nascem aprovadas e a equipe precisa trocar a senha no primeiro login (`--sem-troca` desliga isso). Equipes que já têm conta são puladas. Se `ARGOS_DOMINIO_EQUIPES` foi alterado no Vercel, passe o mesmo valor com `-e`. Na Negociação, as contas saem da planilha Colaboradores, uma por matrícula (ver [Equipes da Negociação](#equipes-da-negociação-matrícula)). O aviso de teste também aceita `--contrato negociacao`.
 
 Na primeira exportação depois da atualização, o bot só registra a equipe de cada ordem. Os avisos de designação começam na exportação seguinte, para que todas as ordens já abertas não cheguem como "novas".
 
