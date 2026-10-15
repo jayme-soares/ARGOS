@@ -49,9 +49,9 @@ COLUNAS_OPCIONAIS = {
     "endereco": "Endereço Completo",
     "estado_tdc": "Estado TdC",
     "nome_cliente": "Nome e Sobrenome Cliente",
-    # Vira o "tipo" do painel ("Religação"); o código ("OUTREA") fica em
-    # tipo_servico.
-    "tipo_tdc": "Tipo TdC",
+    # Coluna K. Vira o "tipo" do painel ("Ciclo 15 - Religação Negociador
+    # Digital"); o código do serviço ("OUTREA") fica em tipo_servico.
+    "ciclo": "Ciclo de trabalho",
 }
 
 # Aba com uma linha por operação do TdC: dá a hora em que a ordem foi
@@ -364,10 +364,10 @@ def ler_exportacao_campo(caminho: Path | str, contrato: Contrato = SOC, co: str 
         venc = converter_data(linha[mapa["vencimento"]])
         registro = {campo: _texto(linha[col]) for campo, col in mapa.items() if campo != "vencimento"}
         registro["vencimento"] = venc.isoformat(timespec="minutes") if venc else None
-        tipo_tdc = registro.pop("tipo_tdc", "")
-        if tipo_tdc:
+        ciclo = registro.pop("ciclo", "")
+        if ciclo:
             registro["tipo_servico"] = registro["tipo"]
-            registro["tipo"] = tipo_tdc
+            registro["tipo"] = ciclo
         if contrato.equipe_por_nome:
             registro["equipe_nome"] = registro["equipe"]
             registro["equipe"] = contrato.chave_equipe(registro["equipe"])

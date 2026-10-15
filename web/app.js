@@ -561,7 +561,8 @@ const celRestante = (r) => `<span class="badge">${esc(textoRestante(r._min))}</s
 const nomeCo = (co) => String(co || "").replace(/^\s*ceneged\s*-\s*/i, "").replace(/\s*\([^)]*\)?\s*$/, "");
 // Coluna CO: só no painel da Negociação (ver colunasDa).
 const COLUNA_CO = { id: "co", rotulo: "CO", multiCo: true, valor: (r) => nomeCo(r.co), html: (r) => esc(nomeCo(r.co)) };
-// Tipo TdC da planilha ("Religação"); o código do serviço (OUTREA/OUTREL) fica embaixo.
+// "Ciclo de trabalho" da planilha ("Ciclo 15 - Religação Negociador Digital");
+// o código do serviço (OUTREA/OUTREL) fica embaixo.
 const COLUNA_TIPO_CAMPO = { id: "tipo", rotulo: "Tipo", valor: (r) => r.tipo, html: (r) => `${esc(r.tipo)}${r.tipo_servico ? `<div class="secundario">${esc(r.tipo_servico)}</div>` : ""}`, cheio: true };
 const COLUNAS = {
   campo: [
