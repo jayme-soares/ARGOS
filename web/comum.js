@@ -109,18 +109,22 @@ const FILTRO_URGENCIA = {
   atencao: (m) => m != null && m > 0 && m <= 120,
 };
 
-// O ciclo de trabalho às vezes diz onde a religação é feita:
-// "Ciclo 9 - Religação (Medidor)" -> "Medidor". Também Poste e Ramal.
-function localDoCiclo(tipo) {
-  const m = /\(([^()]*)\)[^()]*$/.exec(String(tipo || ""));
-  return m && /medidor|poste|ramal/i.test(m[1]) ? m[1].trim() : "";
+// Trâmite: o fim do ciclo de trabalho diz onde a religação é feita.
+// "Ciclo 9 - Religação - Medidor" -> "Medidor"; "Ciclo 11 - Religação - Poste
+// DAT" -> "Poste DAT". Qualquer coisa com "Ramal" ("Instalação de Ramal")
+// vira só "Ramal". Ciclos sem isso ("... - Leiturista") ficam sem trâmite.
+function tramiteDoCiclo(tipo) {
+  const partes = String(tipo || "").split(" - ");
+  const fim = partes.length > 2 ? partes[partes.length - 1].trim() : "";
+  if (/ramal/i.test(fim)) return "Ramal";
+  return /medidor|poste/i.test(fim) ? fim : "";
 }
 
 function enriquecer(registros, agora) {
   return (registros || []).map((r) => {
     const venc = data(r.vencimento);
     const min = venc ? (venc - agora) / 60000 : null;
-    return { ...r, _venc: venc, _min: min, _urg: classificar(min), _local: localDoCiclo(r.tipo) };
+    return { ...r, _venc: venc, _min: min, _urg: classificar(min), _tramite: tramiteDoCiclo(r.tipo) };
   });
 }
 
@@ -131,7 +135,7 @@ function enriquecerFinalizadas(registros) {
     const venc = data(r.vencimento);
     const fim = data(r.finalizada_em);
     const folga = venc && fim ? (venc - fim) / 60000 : null;
-    return { ...r, _venc: venc, _fim: fim, _min: null, _folga: folga, _local: localDoCiclo(r.tipo),
+    return { ...r, _venc: venc, _fim: fim, _min: null, _folga: folga, _tramite: tramiteDoCiclo(r.tipo),
       _urg: r.no_prazo === true ? "ok" : r.no_prazo === false ? "vencida" : "sem" };
   });
 }

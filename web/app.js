@@ -29,7 +29,7 @@ Object.assign(estado, {
   texto: "",
   equipe: "",
   bairro: "",
-  local: "",         // Medidor/Poste/Ramal; SEM_LOCAL = ordens sem essa indicação
+  tramite: "",       // Medidor/Poste/Ramal; SEM_TRAMITE = ordens sem essa indicação
   // COs escolhidos por contrato (só Negociação; vazio = todos). Valem para o
   // painel inteiro e ficam salvos no navegador: cada pessoa acompanha os seus.
   cosPorContrato: prefsSalvas.cos || {},
@@ -85,7 +85,7 @@ function escolherContrato() {
 function trocarContrato(contrato) {
   if (contrato === estado.contrato) return;
   estado.contrato = contrato;
-  Object.assign(estado, { snapshot: null, equipe: "", bairro: "", local: "", urg: "", equipesResumo: [], avisosEquipe: [] });
+  Object.assign(estado, { snapshot: null, equipe: "", bairro: "", tramite: "", urg: "", equipesResumo: [], avisosEquipe: [] });
   // O ?contrato= do link do push não pode prender o painel no contrato antigo.
   if (location.search) history.replaceState(null, "", location.pathname);
   salvarPrefs();
@@ -95,7 +95,7 @@ function trocarContrato(contrato) {
 
 const ABAS_COM_EQUIPE = new Set(["campo", "finalizadas", "avisos"]);
 // Na Negociação a equipe é o nome (coluna "Equipe"); `equipe` é a chave.
-const SEM_LOCAL = "-";
+const SEM_TRAMITE = "-";
 const nomeEquipe = (r) => r.equipe_nome || r.equipe;
 const normEquipe = (e) => String(e || "").replace(/\s+/g, "").toUpperCase();
 
@@ -544,7 +544,7 @@ function renderFiltros(campo, finalizadas, programaveis) {
   $("#filtro-equipe").hidden = !comEquipe;
   const ehAvisos = estado.aba === "avisos";
   $("#filtro-bairro").hidden = !comEquipe || ehAvisos;
-  $("#filtro-local").hidden = !comEquipe || ehAvisos;
+  $("#filtro-tramite").hidden = !comEquipe || ehAvisos;
   $("#filtro-urgencia").hidden = ehFinalizadas || ehAvisos;
   $("#filtro-periodo").hidden = !ehFinalizadas;
   $("#filtro-status-aviso").hidden = !ehAvisos;
@@ -552,9 +552,9 @@ function renderFiltros(campo, finalizadas, programaveis) {
   const unicos = (campo_) => [...new Set(base.map((r) => r[campo_] || ""))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   preencherSelect($("#filtro-equipe"), unicos("equipe"), estado.equipe, "Todas as equipes");
   preencherSelect($("#filtro-bairro"), unicos("bairro"), estado.bairro, "Todos os bairros");
-  const locais = [...new Set(base.map((r) => r._local).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
-  if (base.some((r) => !r._local)) locais.push(SEM_LOCAL);
-  preencherSelect($("#filtro-local"), locais, estado.local, "Todos os locais", (v) => (v === SEM_LOCAL ? "Sem indicação" : v));
+  const tramites = [...new Set(base.map((r) => r._tramite).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  if (base.some((r) => !r._tramite)) tramites.push(SEM_TRAMITE);
+  preencherSelect($("#filtro-tramite"), tramites, estado.tramite, "Todos os trâmites", (v) => (v === SEM_TRAMITE ? "Sem indicação" : v));
   for (const c of $$("#filtro-urgencia .chip")) c.setAttribute("aria-pressed", String(c.dataset.urg === estado.urg));
   for (const c of $$("#filtro-periodo .chip")) c.setAttribute("aria-pressed", String(c.dataset.periodo === estado.periodo));
   for (const c of $$("#filtro-status-aviso .chip")) c.setAttribute("aria-pressed", String(c.dataset.status === estado.statusAviso));
@@ -570,8 +570,8 @@ const COLUNA_CO = { id: "co", rotulo: "CO", multiCo: true, valor: (r) => nomeCo(
 // "Ciclo de trabalho" da planilha ("Ciclo 15 - Religação Negociador Digital");
 // o código do serviço (OUTREA/OUTREL) fica embaixo.
 const COLUNA_TIPO_CAMPO = { id: "tipo", rotulo: "Tipo", valor: (r) => r.tipo, html: (r) => `${esc(r.tipo)}${r.tipo_servico ? `<div class="secundario">${esc(r.tipo_servico)}</div>` : ""}`, cheio: true };
-// Medidor, Poste ou Ramal, tirado do ciclo (localDoCiclo).
-const COLUNA_LOCAL = { id: "local", rotulo: "Local", valor: (r) => r._local, html: (r) => r._local ? esc(r._local) : `<span class="fraco">—</span>` };
+// Medidor, Poste DAT, Ramal..., tirado do fim do ciclo (tramiteDoCiclo).
+const COLUNA_TRAMITE = { id: "tramite", rotulo: "Trâmite", valor: (r) => r._tramite, html: (r) => r._tramite ? esc(r._tramite) : `<span class="fraco">—</span>` };
 const COLUNAS = {
   campo: [
     { id: "restante", rotulo: "Tempo restante", valor: (r) => r._min, html: celRestante },
@@ -583,7 +583,7 @@ const COLUNAS = {
     { id: "equipe", rotulo: "Equipe", valor: (r) => nomeEquipe(r), html: (r) => r.equipe ? esc(nomeEquipe(r)) : `<span class="fraco">sem equipe</span>` },
     { id: "bairro", rotulo: "Bairro", valor: (r) => r.bairro, html: (r) => `${esc(r.bairro)}${r.endereco ? `<div class="secundario celula-endereco" title="${esc(r.endereco)}">${esc(r.endereco)}</div>` : ""}`, cheio: true },
     COLUNA_TIPO_CAMPO,
-    COLUNA_LOCAL,
+    COLUNA_TRAMITE,
   ],
   programaveis: [
     { id: "restante", rotulo: "Tempo restante", valor: (r) => r._min, html: celRestante },
@@ -611,7 +611,7 @@ const COLUNAS = {
     { id: "equipe", rotulo: "Equipe", valor: (r) => nomeEquipe(r), html: (r) => esc(nomeEquipe(r)) },
     { id: "bairro", rotulo: "Bairro", valor: (r) => r.bairro, html: (r) => `${esc(r.bairro)}${r.endereco ? `<div class="secundario celula-endereco" title="${esc(r.endereco)}">${esc(r.endereco)}</div>` : ""}`, cheio: true },
     COLUNA_TIPO_CAMPO,
-    COLUNA_LOCAL,
+    COLUNA_TRAMITE,
     { id: "resultado", rotulo: "Resultado", valor: (r) => r.resultado, html: (r) => `${esc(r.resultado || "—")}${r.causa ? `<div class="secundario">${esc(r.causa)}</div>` : ""}`, cheio: true },
   ],
   equipes: [
@@ -775,7 +775,7 @@ function filtrar(linhas, aba = estado.aba) {
     if (ABAS_COM_EQUIPE.has(aba)) {
       if (estado.equipe && (r.equipe || "") !== estado.equipe) return false;
       if (aba !== "avisos" && estado.bairro && (r.bairro || "") !== estado.bairro) return false;
-      if (aba !== "avisos" && estado.local && (r._local || SEM_LOCAL) !== estado.local) return false;
+      if (aba !== "avisos" && estado.tramite && (r._tramite || SEM_TRAMITE) !== estado.tramite) return false;
     }
     if (aba === "avisos") {
       if (estado.statusAviso && r.status !== estado.statusAviso) return false;
@@ -913,7 +913,7 @@ const COLUNAS_RELATORIO = {
     ["Endereço", (r) => r.endereco],
     ["Tipo", (r) => r.tipo],
     ["Serviço", (r) => r.tipo_servico],
-    ["Local", (r) => r._local],
+    ["Trâmite", (r) => r._tramite],
     ["Vencimento", (r) => dataBrasilia(r._venc), "data"],
     ["Tempo restante", (r) => textoRestante(r._min), "urgencia"],
     ["Situação", (r) => NOME_URGENCIA[r._urg], "urgencia"],
@@ -942,7 +942,7 @@ const COLUNAS_RELATORIO = {
     ["Endereço", (r) => r.endereco],
     ["Tipo", (r) => r.tipo],
     ["Serviço", (r) => r.tipo_servico],
-    ["Local", (r) => r._local],
+    ["Trâmite", (r) => r._tramite],
     ["Vencimento", (r) => dataBrasilia(r._venc), "data"],
     ["Finalizada em", (r) => dataBrasilia(r._fim), "data"],
     ["Situação", (r) => textoSituacaoFinalizada(r), "urgencia"],
@@ -984,7 +984,7 @@ function descreverFiltros(aba) {
   if (cos.length) f.push(`${cos.length === 1 ? "CO" : "COs"} ${cos.map(nomeCo).join(", ")}`);
   if (ABAS_COM_EQUIPE.has(aba) && estado.equipe) f.push(`equipe ${estado.equipe}`);
   if (ABAS_COM_EQUIPE.has(aba) && aba !== "avisos" && estado.bairro) f.push(`bairro ${estado.bairro}`);
-  if (ABAS_COM_EQUIPE.has(aba) && aba !== "avisos" && estado.local) f.push(`local ${estado.local === SEM_LOCAL ? "sem indicação" : estado.local}`);
+  if (ABAS_COM_EQUIPE.has(aba) && aba !== "avisos" && estado.tramite) f.push(`trâmite ${estado.tramite === SEM_TRAMITE ? "sem indicação" : estado.tramite}`);
   return f.length ? `Filtros: ${f.join(", ")}` : "Sem filtros";
 }
 
@@ -1115,7 +1115,7 @@ $("#kpis").addEventListener("click", (ev) => {
   if (aba === "avisos") estado.statusAviso = "pendente";
   estado.equipe = "";
   estado.bairro = "";
-  estado.local = "";
+  estado.tramite = "";
   trocarAba(aba);
 });
 
@@ -1156,7 +1156,7 @@ $("#tabela-corpo").addEventListener("click", async (ev) => {
 $("#filtro-texto").addEventListener("input", (ev) => { estado.texto = ev.target.value; renderizar(); });
 $("#filtro-equipe").addEventListener("change", (ev) => { estado.equipe = ev.target.value; renderizar(); });
 $("#filtro-bairro").addEventListener("change", (ev) => { estado.bairro = ev.target.value; renderizar(); });
-$("#filtro-local").addEventListener("change", (ev) => { estado.local = ev.target.value; renderizar(); });
+$("#filtro-tramite").addEventListener("change", (ev) => { estado.tramite = ev.target.value; renderizar(); });
 $("#filtro-cos-chips").addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-co]");
   if (!b) return;
