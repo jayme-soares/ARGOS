@@ -285,6 +285,11 @@ button.kpi:hover { border-color: var(--texto-3); }
 .tabela tbody tr:hover td { background: color-mix(in srgb, var(--bg-sunk) 60%, transparent); }
 .tabela tbody tr.u-vencida td { background: var(--vencida-bg); }
 .tabela tbody tr.u-vencida:hover td { background: color-mix(in srgb, var(--vencida-bg) 100%, var(--bg-sunk) 30%); }
+/* Cabeçalho de seção (aba Acessos). */
+.tabela tbody tr.grupo-linha td, .tabela tbody tr.grupo-linha:hover td {
+  background: var(--bg-sunk); box-shadow: none; padding: 14px 12px 6px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--texto-2);
+}
 .u-vencida { --cor-linha: var(--vencida); }
 .u-critico { --cor-linha: var(--critico); }
 .u-alerta { --cor-linha: var(--alerta); }
@@ -396,5 +401,6 @@ body.bloqueado { overflow: hidden; }
     letter-spacing: .06em; color: var(--texto-3);
   }
   .tabela td.cheio { grid-column: 1 / -1; }
+  .tabela tbody tr.grupo-linha { display: block; background: none; border: 0; box-shadow: none; padding: 12px 0 2px; margin: 0; }
   .celula-endereco { max-width: none; white-space: normal; }
 }

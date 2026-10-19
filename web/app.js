@@ -40,11 +40,13 @@ Object.assign(estado, {
     programaveis: { col: "restante", dir: 1 },
     finalizadas: { col: "finalizada", dir: -1 },
     equipes: { col: "vencidas", dir: -1 },
-    acessos: { col: "status", dir: 1 },
+    acessos: { col: "nome", dir: 1 },
     avisos: { col: "enviado", dir: -1 },
   },
   statusAviso: "",   // aba Avisos: "", "pendente", "confirmado" ou "dispensado"
   acessos: [],       // todas as linhas (só admins)
+  tipoAcesso: "",    // aba Acessos: "", "pendente", "admin", "usuario", "equipe" ou "recusado"
+  painelAcesso: "",  // aba Acessos: "" ou um contrato (soc, negociacao)
   equipesResumo: [], // contas das equipes: última visualização, push, pendências
   avisosEquipe: [],  // avisos às equipes dos últimos 7 dias
   // Os dois acima já filtrados pelos COs escolhidos (ver aplicarFiltroCo).
@@ -537,15 +539,43 @@ function preencherSelect(sel, valores, atual, rotuloTodos, rotulo = (v) => v) {
   sel.value = atual;
 }
 
+// Chips da aba Acessos: tipo (com a contagem de cada um) e painel.
+function renderChipsAcesso() {
+  const contagem = {};
+  for (const a of estado.acessos) {
+    const t = tipoDaSecao(secaoAcesso(a));
+    contagem[t] = (contagem[t] || 0) + 1;
+  }
+  const chip = (attr, valor, rotulo, ativo, extra = "") =>
+    `<button class="chip${extra}" data-${attr}="${valor}" aria-pressed="${ativo}">${rotulo}</button>`;
+  const tipos = TIPOS_ACESSO.map(([v, rotulo]) => {
+    const n = v ? contagem[v] || 0 : estado.acessos.length;
+    const destaque = v === "pendente" && n ? " chip-alerta" : "";
+    return chip("tipo-acesso", v, `${esc(rotulo)} <span class="num">${n}</span>`, v === estado.tipoAcesso, destaque);
+  }).join("");
+  const paineis = [["", "Todos os painéis"], ...CONTRATOS.map((c) => [c, NOMES_CONTRATO[c]])]
+    .map(([v, rotulo]) => chip("painel-acesso", v, esc(rotulo), v === estado.painelAcesso)).join("");
+  for (const [sel, html] of [["#filtro-tipo-acesso", tipos], ["#filtro-painel-acesso", paineis]]) {
+    const el = $(sel);
+    if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+  }
+}
+
 function renderFiltros(campo, finalizadas, programaveis) {
-  $("#filtros").hidden = estado.aba === "equipes" || estado.aba === "acessos";
+  const ehAcessos = estado.aba === "acessos";
+  $("#filtros").hidden = estado.aba === "equipes";
   const comEquipe = ABAS_COM_EQUIPE.has(estado.aba);
   const ehFinalizadas = estado.aba === "finalizadas";
   $("#filtro-equipe").hidden = !comEquipe;
   const ehAvisos = estado.aba === "avisos";
   $("#filtro-bairro").hidden = !comEquipe || ehAvisos;
   $("#filtro-tramite").hidden = !comEquipe || ehAvisos;
-  $("#filtro-urgencia").hidden = ehFinalizadas || ehAvisos;
+  $("#filtro-urgencia").hidden = ehFinalizadas || ehAvisos || ehAcessos;
+  $("#btn-exportar").hidden = ehAcessos;
+  $("#filtro-tipo-acesso").hidden = !ehAcessos;
+  $("#filtro-painel-acesso").hidden = !ehAcessos;
+  $("#filtro-texto").placeholder = ehAcessos ? "Buscar nome, email ou equipe…" : "Buscar ordem, TdC, cliente, endereço…";
+  if (ehAcessos) renderChipsAcesso();
   $("#filtro-periodo").hidden = !ehFinalizadas;
   $("#filtro-status-aviso").hidden = !ehAvisos;
   const base = ehAvisos ? estado.avisosVisiveis : ehFinalizadas ? finalizadas : campo;
@@ -688,7 +718,37 @@ function urgAviso(a, agora) {
   return agora - data(a.criado_em) > 15 * 60000 ? "vencida" : "alerta";
 }
 
-const ORDEM_STATUS = { pendente: 0, aprovado: 1, recusado: 2 };
+// Aba Acessos agrupada em seções, nesta ordem. O status fica implícito na
+// seção (pendentes e recusados têm a sua; as demais são aprovados).
+const SECOES_ACESSO = [
+  { id: "pendente", rotulo: "Aguardando aprovação" },
+  { id: "admin", rotulo: "Administradores" },
+  { id: "usuario", rotulo: "Usuários" },
+  ...CONTRATOS.map((c) => ({ id: `equipe:${c}`, rotulo: `Equipes · ${NOMES_CONTRATO[c]}` })),
+  { id: "recusado", rotulo: "Recusados ou revogados" },
+];
+const TIPOS_ACESSO = [["", "Todos"], ["pendente", "Pendentes"], ["admin", "Administradores"], ["usuario", "Usuários"], ["equipe", "Equipes"], ["recusado", "Recusados"]];
+
+function secaoAcesso(a) {
+  if (a.status === "pendente") return "pendente";
+  if (a.status === "recusado") return "recusado";
+  if (a.papel === "equipe") return `equipe:${a.contrato}`;
+  return a.papel === "admin" ? "admin" : "usuario";
+}
+const tipoDaSecao = (s) => s.split(":")[0];
+const paineisDoAcesso = (a) => (a.papel === "equipe" ? [a.contrato] : contratosDe(a));
+
+function filtrarAcessos(linhas) {
+  const termo = estado.texto.trim().toLowerCase();
+  return linhas.filter((a) => {
+    if (estado.tipoAcesso && tipoDaSecao(secaoAcesso(a)) !== estado.tipoAcesso) return false;
+    // Quem ainda não tem painel liberado (ex.: pedido novo) aparece em qualquer painel.
+    const paineis = paineisDoAcesso(a);
+    if (estado.painelAcesso && paineis.length && !paineis.includes(estado.painelAcesso)) return false;
+    return !termo || [a.nome, a.email, a.equipe].join(" ").toLowerCase().includes(termo);
+  });
+}
+
 COLUNAS.acessos = [
   { id: "nome", rotulo: "Usuário", valor: (a) => a.equipe || a.nome || a.email, html: (a, agora) => {
     if (a.papel === "equipe") {
@@ -702,7 +762,6 @@ COLUNAS.acessos = [
     const papel = a.super_admin ? ` <span class="tag admin">admin geral</span>` : a.papel === "admin" ? ` <span class="tag admin">admin</span>` : "";
     return `${esc(a.nome || a.email)}${papel}${a.nome ? `<div class="secundario">${esc(a.email)}</div>` : ""}`;
   } },
-  { id: "status", rotulo: "Status", valor: (a) => ORDEM_STATUS[a.status], html: (a) => `<span class="tag ${esc(a.status)}">${esc(a.status)}</span>` },
   // Painéis liberados. Só o administrador geral muda (argos_definir_contratos).
   { id: "contratos", rotulo: "Painéis", valor: (a) => (a.papel === "equipe" ? a.contrato : contratosDe(a).join(",")), html: (a) => {
     if (a.papel === "equipe") return `<span class="tag">${esc(NOMES_CONTRATO[a.contrato] || a.contrato || "")}</span>`;
@@ -813,7 +872,7 @@ function linhasDaAba(campo, programaveis, finalizadas, aba = estado.aba) {
   else if (aba === "avisos") {
     const agora = new Date();
     linhas = filtrar(estado.avisosVisiveis.map((a) => ({ ...a, _urg: urgAviso(a, agora) })), aba);
-  } else if (aba === "acessos") linhas = estado.acessos.map((a) => ({ ...a, _urg: a.status === "pendente" ? "alerta" : a.status === "recusado" ? "sem" : "ok" }));
+  } else if (aba === "acessos") linhas = filtrarAcessos(estado.acessos).map((a) => ({ ...a, _urg: a.status === "pendente" ? "alerta" : a.status === "recusado" ? "sem" : "ok" }));
   else {
     const agora = new Date();
     linhas = agruparPorEquipe(campo, finalizadas.filter((r) => finalizadaHoje(r, agora)));
@@ -833,11 +892,18 @@ function renderTabela(campo, programaveis, finalizadas, agora) {
     return `<th data-col="${c.id}"${ativo ? ` aria-sort="${dir > 0 ? "ascending" : "descending"}"` : ""}>${esc(c.rotulo)}<span class="seta">${seta}</span></th>`;
   }).join("")}</tr>`;
 
-  $("#tabela-corpo").innerHTML = linhas.map((r) =>
+  const linhaHtml = (r) =>
     `<tr class="u-${r._urg}">${colunas.map((c) =>
       `<td data-label="${esc(c.rotulo)}"${c.cheio ? ' class="cheio"' : ""}>${c.html(r, agora)}</td>`
-    ).join("")}</tr>`
-  ).join("");
+    ).join("")}</tr>`;
+  // Acessos: uma seção por tipo, cada uma na ordenação escolhida.
+  $("#tabela-corpo").innerHTML = estado.aba === "acessos"
+    ? SECOES_ACESSO.map((s) => {
+      const doGrupo = linhas.filter((a) => secaoAcesso(a) === s.id);
+      if (!doGrupo.length) return "";
+      return `<tr class="grupo-linha"><td colspan="${colunas.length}">${esc(s.rotulo)} <span class="contador">${doGrupo.length}</span></td></tr>${doGrupo.map(linhaHtml).join("")}`;
+    }).join("")
+    : linhas.map(linhaHtml).join("");
 
   const vazio = $("#vazio");
   vazio.hidden = linhas.length > 0;
@@ -852,7 +918,7 @@ function renderTabela(campo, programaveis, finalizadas, agora) {
       finalizadas: estado.periodo === "hoje" ? "Nenhuma ordem finalizada hoje." : "Nenhuma ordem finalizada no período da extração.",
     }[estado.aba] || "Nenhuma religação em campo no relatório.";
     vazio.textContent = estado.aba === "acessos"
-      ? "Nenhum pedido de acesso."
+      ? (estado.acessos.length ? "Nenhum acesso com esses filtros." : "Nenhum pedido de acesso.")
       : estado.aba === "avisos"
       ? (estado.avisosVisiveis.length ? "Nenhum aviso com esses filtros." : "Nenhum aviso às equipes nos últimos 7 dias.")
       : !estado.snapshot
@@ -1179,6 +1245,20 @@ $("#filtro-status-aviso").addEventListener("click", (ev) => {
   const c = ev.target.closest(".chip");
   if (!c) return;
   estado.statusAviso = c.dataset.status;
+  renderizar();
+});
+
+$("#filtro-tipo-acesso").addEventListener("click", (ev) => {
+  const c = ev.target.closest(".chip");
+  if (!c) return;
+  estado.tipoAcesso = c.dataset.tipoAcesso;
+  renderizar();
+});
+
+$("#filtro-painel-acesso").addEventListener("click", (ev) => {
+  const c = ev.target.closest(".chip");
+  if (!c) return;
+  estado.painelAcesso = c.dataset.painelAcesso;
   renderizar();
 });
 
