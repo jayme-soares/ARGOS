@@ -117,7 +117,24 @@
       <button role="tab" data-aba="equipes" class="aba">Por equipe <span class="contador" id="cont-equipes">0</span></button>
       <button role="tab" data-aba="avisos" class="aba" id="aba-avisos" title="Avisos às equipes e confirmações" hidden>Avisos <span class="contador" id="cont-avisos">0</span></button>
       <button role="tab" data-aba="acessos" class="aba" id="aba-acessos" hidden>Acessos <span class="contador" id="cont-acessos">0</span></button>
+      <button role="tab" data-aba="tvs" class="aba" id="aba-tvs" title="TVs do modo kiosk (/tv)" hidden>TVs <span class="contador" id="cont-tvs">0</span></button>
     </nav>
+
+    <!-- Aba TVs: parear uma TV pelo PIN que aparece em /tv (migração 005). -->
+    <form class="parear-tv" id="form-parear-tv" hidden autocomplete="off">
+      <div class="parear-tv-texto">
+        <b>Parear uma TV</b>
+        <span>Na TV, abra <span class="num" id="parear-tv-url">/tv</span> e digite aqui o código de 6 dígitos que aparecer.</span>
+      </div>
+      <label>Código<input id="tv-pin" class="num" inputmode="numeric" maxlength="7" placeholder="000 000" required></label>
+      <label>Nome<input id="tv-nome" maxlength="60" value="Sala de reuniões"></label>
+      <label>Painel<select id="tv-contrato"></select></label>
+      <label>Tema<select id="tv-tema"><option value="escuro">Escuro</option><option value="claro">Claro</option></select></label>
+      <label>Zoom<select id="tv-zoom"></select></label>
+      <label id="tv-cos-campo" hidden>COs<input id="tv-cos" placeholder="todos (ex.: Angra, Volta Redonda)"></label>
+      <button class="btn-primario" type="submit">Parear TV</button>
+      <p class="parear-tv-msg" id="parear-tv-msg"></p>
+    </form>
 
     <section class="filtros" id="filtros">
       <div class="busca">

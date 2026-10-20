@@ -14,8 +14,8 @@
 </head>
 <body>
   <!-- Modo TV: tela fixa para a sala de reuniões, sem login e sem interação.
-       Entra pela chave da TV: /tv?chave=...&contrato=soc|negociacao (ver api/tv.js). -->
-  <div class="tela" id="tela">
+       Pareada por PIN no painel (aba TVs) — ver tv.js e api/tv.js. -->
+  <div class="tela" id="tela" hidden>
     <header class="topo">
       <div class="marca">
         <span class="marca-ponto"></span>
@@ -64,10 +64,14 @@
     <footer class="rodape" id="rodape"></footer>
   </div>
 
-  <div class="bloqueio" id="bloqueio" hidden>
-    <div class="bloqueio-card">
+  <div class="pareamento" id="pareamento">
+    <div class="pareamento-card">
       <div class="marca"><span class="marca-ponto"></span><span class="marca-nome">ARGOS</span></div>
-      <p id="bloqueio-texto"></p>
+      <h1>Parear esta TV</h1>
+      <p>No computador, entre no painel do ARGOS (<b id="pin-endereco"></b>), abra a aba <b>TVs</b> e digite o código:</p>
+      <div class="pin num" id="pin">··· ···</div>
+      <p class="pin-validade num" id="pin-validade"></p>
+      <p class="pin-erro" id="pin-erro"></p>
     </div>
   </div>
 

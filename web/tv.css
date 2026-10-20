@@ -149,8 +149,13 @@ h2 { margin: 0; font-size: 1.05rem; font-weight: 600; letter-spacing: .06em; tex
 .rodape { display: flex; justify-content: space-between; padding: .55rem .2rem .7rem; font-size: .9rem; color: var(--texto-3); }
 .rodape span + span { margin-left: 2rem; }
 
-/* tela de bloqueio (sem chave / chave inválida) */
-.bloqueio { position: fixed; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); }
-.bloqueio-card { max-width: 46rem; text-align: center; }
-.bloqueio-card .marca { justify-content: center; margin-bottom: 1.5rem; }
-.bloqueio-card p { font-size: 1.5rem; color: var(--texto-2); line-height: 1.5; }
+/* pareamento (PIN) */
+.pareamento { position: fixed; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+.pareamento-card { max-width: 60rem; text-align: center; }
+.pareamento-card .marca { justify-content: center; margin-bottom: 2.5rem; }
+.pareamento-card h1 { margin: 0 0 1rem; font-size: 2.6rem; font-weight: 600; }
+.pareamento-card p { margin: 0; font-size: 1.6rem; color: var(--texto-2); line-height: 1.5; }
+.pareamento-card b { color: var(--texto); }
+.pin { margin: 2.5rem 0 1.2rem; font-size: 9rem; font-weight: 600; letter-spacing: .12em; color: var(--marca); line-height: 1; }
+.pareamento-card .pin-validade { font-size: 1.3rem; color: var(--texto-3); }
+.pareamento-card .pin-erro { margin-top: 1.5rem; font-size: 1.3rem; color: var(--vencida); }

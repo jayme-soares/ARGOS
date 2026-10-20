@@ -240,7 +240,6 @@ Na primeira exportação depois da atualização, o bot só registra a equipe de
    - `SUPABASE_URL`: em Project Settings → API
    - `SUPABASE_ANON_KEY`: a chave **anon/public**.
    - `SUPABASE_SERVICE_ROLE_KEY`: a chave **service_role**, só para as contas das equipes (ver acima). É usada apenas no servidor, nas funções `/api/*`.
-   - `ARGOS_TV_CHAVE`: opcional, só para o [modo TV](#modo-tv-tv).
 3. Faça o deploy. Coloque a URL gerada em `ARGOS_PAINEL_URL` no `.env` da VPS, para que tocar no push abra o painel.
 
 Para testar localmente: `cd web && npx vercel dev`, com as mesmas variáveis num `web/.env.local`.
@@ -249,10 +248,13 @@ Para testar localmente: `cd web && npx vercel dev`, com as mesmas variáveis num
 
 Tela fixa para a TV da sala de reuniões, sem login: indicadores, a lista em campo por vencimento (as páginas passam sozinhas a cada 15s), o próximo vencimento, o resumo por equipe e as programáveis. Lê o mesmo snapshot do painel a cada 60s. Não mostra nome, endereço nem código do cliente: o `/api/tv` já corta esses campos no servidor.
 
-1. No Vercel, crie a variável `ARGOS_TV_CHAVE` com um valor longo e aleatório (por exemplo, `openssl rand -hex 24`) e faça o redeploy. Para trocar a chave sem derrubar a TV, ponha a nova e a antiga separadas por vírgula e tire a antiga depois. Apagar a variável desliga o modo TV.
-2. No navegador da TV, abra `https://<painel>/tv?chave=<chave>` e salve nos favoritos.
+A TV é pareada por PIN, como nos apps de streaming, sem digitar nada além do endereço:
 
-Outros parâmetros: `contrato=negociacao` (o padrão é a SOC), `co=Angra,Volta Redonda` (Negociação: só esses COs), `tema=claro` (o padrão é escuro) e `zoom=1.2` (aumenta ou diminui tudo).
+1. Uma vez só: rode [`supabase/migrations/005_argos_tvs.sql`](supabase/migrations/005_argos_tvs.sql) no SQL Editor do Supabase. O Vercel não precisa de variável nova.
+2. No navegador da TV, abra `https://<painel>/tv` e salve nos favoritos. A tela mostra um código de 6 dígitos (vale 10 minutos; depois sai outro sozinho).
+3. No computador, um admin entra no painel, abre a aba **TVs**, digita o código e escolhe o painel (SOC ou Negociação), o tema, o zoom e, na Negociação, os COs. Em alguns segundos a TV passa a mostrar o painel.
+
+Na aba **TVs** também dá para mudar o painel, o tema, o zoom e os COs de uma TV já pareada (ela pega a mudança na próxima leitura, em até 1 minuto), ver se ela está no ar e **desconectar**. Desconectada, a TV volta a mostrar um código. Cada admin pareia e vê só as TVs dos painéis liberados para ele. O pareamento fica guardado no navegador da TV: limpar os dados do navegador exige parear de novo.
 
 Na TV Samsung, desligue a proteção de tela e o desligamento automático (Configurações → Geral → Gerenciador do sistema / Solução Eco), senão ela apaga a tela depois de um tempo sem uso do controle.
 

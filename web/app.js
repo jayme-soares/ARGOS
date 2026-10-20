@@ -41,12 +41,14 @@ Object.assign(estado, {
     finalizadas: { col: "finalizada", dir: -1 },
     equipes: { col: "vencidas", dir: -1 },
     acessos: { col: "nome", dir: 1 },
+    tvs: { col: "nome", dir: 1 },
     avisos: { col: "enviado", dir: -1 },
   },
   statusAviso: "",   // aba Avisos: "", "pendente", "confirmado" ou "dispensado"
   acessos: [],       // todas as linhas (só admins)
   tipoAcesso: "",    // aba Acessos: "", "pendente", "admin", "usuario", "equipe" ou "recusado"
   painelAcesso: "",  // aba Acessos: "" ou um contrato (soc, negociacao)
+  tvs: [],           // TVs pareadas do modo kiosk (só admins; null = migração 005 ausente)
   equipesResumo: [], // contas das equipes: última visualização, push, pendências
   avisosEquipe: [],  // avisos às equipes dos últimos 7 dias
   // Os dois acima já filtrados pelos COs escolhidos (ver aplicarFiltroCo).
@@ -123,7 +125,7 @@ async function buscarSnapshot() {
     estado.snapshot = corpo;
     estado.ultimoErro = null;
     if (!estado.pushSincronizado) { estado.pushSincronizado = true; sincronizarPush(); }
-    await Promise.all([carregarDadosEquipes(), ehAdmin() ? carregarAcessos() : null]);
+    await Promise.all([carregarDadosEquipes(), ehAdmin() ? carregarAcessos() : null, ehAdmin() ? carregarTvs() : null]);
     return true;
   } catch (e) {
     estado.ultimoErro = e.message || String(e);
@@ -140,6 +142,19 @@ async function carregarAcessos() {
     .select("*")
     .order("solicitado_em", { ascending: false });
   if (!error) estado.acessos = data || [];
+}
+
+// TVs do modo kiosk (migração 005). Sem ela, a aba TVs avisa.
+async function carregarTvs() {
+  const { data, error } = await estado.sb.rpc("argos_tv_listar");
+  estado.tvs = error ? null : data || [];
+}
+
+async function acaoTv(funcao, params) {
+  const { error } = await estado.sb.rpc(funcao, params);
+  if (error) alert(error.message);
+  await carregarTvs();
+  renderizar();
 }
 
 // Contas das equipes e avisos do contrato exibido (migrações 003 e 004).
@@ -219,6 +234,7 @@ async function sair(mensagem) {
   estado.acesso = null;
   estado.snapshot = null;
   estado.acessos = [];
+  estado.tvs = [];
   try { await estado.sb.auth.signOut(); } catch { /* sessão já inválida */ }
   mostrarLogin(mensagem);
 }
@@ -348,7 +364,7 @@ function renderizar() {
   renderKpis(snap, campo, programaveis, finalizadas, totalProgramaveis, agora);
   renderAbas(campo, programaveis, finalizadas, agora);
   renderFiltros(campo, finalizadas, programaveis);
-  if (estado.aba === "acessos" && !ehAdmin()) estado.aba = "campo";
+  if ((estado.aba === "acessos" || estado.aba === "tvs") && !ehAdmin()) estado.aba = "campo";
   renderTabela(campo, programaveis, finalizadas, agora);
   $("#usuario-atual").textContent = estado.acesso?.email || "";
 
@@ -528,6 +544,8 @@ function renderAbas(campo, programaveis, finalizadas, agora) {
   const pendentes = estado.acessos.filter((a) => a.status === "pendente").length;
   $("#cont-acessos").textContent = pendentes;
   $("#cont-acessos").style.color = pendentes ? "var(--alerta)" : "";
+  $("#aba-tvs").hidden = !ehAdmin();
+  $("#cont-tvs").textContent = (estado.tvs || []).length;
   for (const b of $$(".aba")) b.setAttribute("aria-selected", String(b.dataset.aba === estado.aba));
 }
 
@@ -563,7 +581,8 @@ function renderChipsAcesso() {
 
 function renderFiltros(campo, finalizadas, programaveis) {
   const ehAcessos = estado.aba === "acessos";
-  $("#filtros").hidden = estado.aba === "equipes";
+  $("#filtros").hidden = estado.aba === "equipes" || estado.aba === "tvs";
+  renderFormTv();
   const comEquipe = ABAS_COM_EQUIPE.has(estado.aba);
   const ehFinalizadas = estado.aba === "finalizadas";
   $("#filtro-equipe").hidden = !comEquipe;
@@ -800,6 +819,59 @@ COLUNAS.acessos = [
   } },
 ];
 
+// ---------- aba TVs (modo kiosk) ----------
+// A TV lê o snapshot a cada 60s: sem contato há 3 min, está desligada ou sem rede.
+const tvOnline = (t, agora) => { const d = data(t.ultimo_acesso_em); return !!d && agora - d < 3 * 60000; };
+const ZOOMS_TV = [0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.5, 1.75, 2];
+const opcoesHtml = (lista, atual) => lista.map(([v, rotulo]) => `<option value="${esc(v)}"${String(v) === String(atual) ? " selected" : ""}>${esc(rotulo)}</option>`).join("");
+const opcoesZoom = (atual) => opcoesHtml(ZOOMS_TV.map((z) => [z, `${Math.round(z * 100)}%`]), atual ?? 1);
+const opcoesTema = (atual) => opcoesHtml([["escuro", "Escuro"], ["claro", "Claro"]], atual || "escuro");
+const textoCos = (cos) => (cos || []).join(", ");
+const listaCos = (texto) => String(texto || "").split(",").map((c) => c.trim()).filter(Boolean);
+
+function renderFormTv() {
+  const form = $("#form-parear-tv");
+  form.hidden = estado.aba !== "tvs" || !ehAdmin();
+  if (form.hidden) return;
+  $("#parear-tv-url").textContent = `${location.host}/tv`;
+  const sel = $("#tv-contrato");
+  const html = opcoesHtml(contratosDe(estado.acesso).map((c) => [c, NOMES_CONTRATO[c]]), sel.value || estado.contrato);
+  if (sel.dataset.html !== html) { const atual = sel.value; sel.innerHTML = html; sel.dataset.html = html; if (atual) sel.value = atual; }
+  const zoom = $("#tv-zoom");
+  if (!zoom.options.length) zoom.innerHTML = opcoesZoom(1);
+  $("#tv-cos-campo").hidden = sel.value !== "negociacao";
+}
+
+// Muda um campo de uma TV pareada mantendo os outros.
+function atualizarTv(tv, mudancas) {
+  const config = { ...(tv.config || {}), ...(mudancas.config || {}) };
+  return acaoTv("argos_tv_atualizar", {
+    p_id: tv.id, p_nome: mudancas.nome ?? tv.nome, p_contrato: mudancas.contrato ?? tv.contrato, p_config: config,
+  });
+}
+
+COLUNAS.tvs = [
+  { id: "nome", rotulo: "TV", valor: (t) => t.nome, html: (t) => `${esc(t.nome)}<div class="secundario" title="${esc(t.user_agent)}">${esc(String(t.user_agent || "").slice(0, 60))}</div>` },
+  { id: "situacao", rotulo: "Situação", valor: (t) => t.ultimo_acesso_em, html: (t, agora) => tvOnline(t, agora)
+    ? `<span class="tag aprovado">no ar</span><div class="secundario">contato ${esc(haQuanto(data(t.ultimo_acesso_em), agora))}</div>`
+    : `<span class="tag dispensado">sem contato</span><div class="secundario">${esc(t.ultimo_acesso_em ? haQuanto(data(t.ultimo_acesso_em), agora) : "nunca")}</div>` },
+  { id: "contrato", rotulo: "Painel", valor: (t) => t.contrato, html: (t) =>
+    `<select class="tv-campo" data-tv="${esc(t.id)}" data-tv-campo="contrato">${opcoesHtml(contratosDe(estado.acesso).map((c) => [c, NOMES_CONTRATO[c]]), t.contrato)}</select>` },
+  { id: "tema", rotulo: "Tema", valor: (t) => t.config?.tema, html: (t) =>
+    `<select class="tv-campo" data-tv="${esc(t.id)}" data-tv-campo="tema">${opcoesTema(t.config?.tema)}</select>` },
+  { id: "zoom", rotulo: "Zoom", valor: (t) => t.config?.zoom, html: (t) =>
+    `<select class="tv-campo" data-tv="${esc(t.id)}" data-tv-campo="zoom">${opcoesZoom(t.config?.zoom)}</select>` },
+  { id: "cos", rotulo: "COs", valor: (t) => textoCos(t.config?.cos), html: (t) => t.contrato !== "negociacao"
+    ? `<span class="fraco">—</span>`
+    : (t.config?.cos?.length ? esc(textoCos(t.config.cos)) : `<span class="fraco">todos</span>`) },
+  { id: "pareada", rotulo: "Pareada", valor: (t) => t.aprovado_em, html: (t, agora) =>
+    `<span class="secundario">${esc(haQuanto(data(t.aprovado_em), agora))}${t.aprovado_por_email ? ` · ${esc(t.aprovado_por_email)}` : ""}</span>` },
+  { id: "acoes", rotulo: "Ações", valor: null, cheio: true, html: (t) => `<div class="acoes-linha">`
+    + `<button class="btn-mini" data-tv="${esc(t.id)}" data-tv-acao="renomear">Renomear</button>`
+    + (t.contrato === "negociacao" ? `<button class="btn-mini" data-tv="${esc(t.id)}" data-tv-acao="cos">COs</button>` : "")
+    + `<button class="btn-mini recusar" data-tv="${esc(t.id)}" data-tv-acao="remover">Desconectar</button></div>` },
+];
+
 function agruparPorEquipe(campo, finalizadasHoje = []) {
   const grupos = new Map();
   const grupo = (k) => {
@@ -872,6 +944,9 @@ function linhasDaAba(campo, programaveis, finalizadas, aba = estado.aba) {
   else if (aba === "avisos") {
     const agora = new Date();
     linhas = filtrar(estado.avisosVisiveis.map((a) => ({ ...a, _urg: urgAviso(a, agora) })), aba);
+  } else if (aba === "tvs") {
+    const agora = new Date();
+    linhas = (estado.tvs || []).map((t) => ({ ...t, _urg: tvOnline(t, agora) ? "ok" : "sem" }));
   } else if (aba === "acessos") linhas = filtrarAcessos(estado.acessos).map((a) => ({ ...a, _urg: a.status === "pendente" ? "alerta" : a.status === "recusado" ? "sem" : "ok" }));
   else {
     const agora = new Date();
@@ -917,7 +992,9 @@ function renderTabela(campo, programaveis, finalizadas, agora) {
       programaveis: "Nenhuma religação programável no momento.",
       finalizadas: estado.periodo === "hoje" ? "Nenhuma ordem finalizada hoje." : "Nenhuma ordem finalizada no período da extração.",
     }[estado.aba] || "Nenhuma religação em campo no relatório.";
-    vazio.textContent = estado.aba === "acessos"
+    vazio.textContent = estado.aba === "tvs"
+      ? (estado.tvs ? "Nenhuma TV pareada." : "A tabela de TVs ainda não existe: aplique a migração supabase/migrations/005_argos_tvs.sql.")
+      : estado.aba === "acessos"
       ? (estado.acessos.length ? "Nenhum acesso com esses filtros." : "Nenhum pedido de acesso.")
       : estado.aba === "avisos"
       ? (estado.avisosVisiveis.length ? "Nenhum aviso com esses filtros." : "Nenhum aviso às equipes nos últimos 7 dias.")
@@ -1194,7 +1271,69 @@ $("#tabela-cabecalho").addEventListener("click", (ev) => {
   renderizar();
 });
 
+// ---------- aba TVs ----------
+$("#tv-contrato").addEventListener("change", renderFormTv);
+
+$("#form-parear-tv").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const msg = $("#parear-tv-msg");
+  const botao = ev.target.querySelector("button[type=submit]");
+  const contrato = $("#tv-contrato").value;
+  botao.disabled = true;
+  msg.className = "parear-tv-msg";
+  msg.textContent = "Pareando…";
+  const { error } = await estado.sb.rpc("argos_tv_parear", {
+    p_pin: $("#tv-pin").value,
+    p_nome: $("#tv-nome").value,
+    p_contrato: contrato,
+    p_config: {
+      tema: $("#tv-tema").value,
+      zoom: Number($("#tv-zoom").value),
+      cos: contrato === "negociacao" ? listaCos($("#tv-cos").value) : [],
+    },
+  });
+  botao.disabled = false;
+  if (error) {
+    msg.className = "parear-tv-msg erro";
+    msg.textContent = error.message;
+    return;
+  }
+  msg.className = "parear-tv-msg ok";
+  msg.textContent = "TV pareada. Em alguns segundos ela passa a mostrar o painel.";
+  $("#tv-pin").value = "";
+  await carregarTvs();
+  renderizar();
+});
+
+$("#tabela-corpo").addEventListener("change", (ev) => {
+  const sel = ev.target.closest("select[data-tv-campo]");
+  const tv = sel && (estado.tvs || []).find((t) => t.id === sel.dataset.tv);
+  if (!tv) return;
+  sel.disabled = true;
+  const campo = sel.dataset.tvCampo;
+  if (campo === "contrato") atualizarTv(tv, { contrato: sel.value });
+  else atualizarTv(tv, { config: { [campo]: campo === "zoom" ? Number(sel.value) : sel.value } });
+});
+
 $("#tabela-corpo").addEventListener("click", async (ev) => {
+  const botaoTv = ev.target.closest("[data-tv-acao]");
+  if (botaoTv) {
+    const tv = (estado.tvs || []).find((t) => t.id === botaoTv.dataset.tv);
+    if (!tv) return;
+    const acao = botaoTv.dataset.tvAcao;
+    if (acao === "remover") {
+      if (!confirm(`Desconectar a TV "${tv.nome}"? Ela volta a mostrar um código para parear de novo.`)) return;
+      botaoTv.disabled = true;
+      await acaoTv("argos_tv_remover", { p_id: tv.id });
+    } else if (acao === "renomear") {
+      const nome = prompt("Nome da TV:", tv.nome);
+      if (nome != null && nome.trim()) await atualizarTv(tv, { nome: nome.trim() });
+    } else if (acao === "cos") {
+      const cos = prompt("COs que esta TV mostra, separados por vírgula (vazio = todos):", textoCos(tv.config?.cos));
+      if (cos != null) await atualizarTv(tv, { config: { cos: listaCos(cos) } });
+    }
+    return;
+  }
   const conta = ev.target.closest("[data-conta-equipe]");
   if (conta) {
     if (conta.dataset.confirmar && !confirm(conta.dataset.confirmar)) return;
@@ -1273,6 +1412,7 @@ $("#btn-atualizar").addEventListener("click", () => buscarSnapshot());
 $("#btn-exportar").addEventListener("click", exportarRelatorio);
 $("#btn-sair").addEventListener("click", () => sair());
 $("#aba-acessos").addEventListener("click", () => carregarAcessos().then(renderizar));
+$("#aba-tvs").addEventListener("click", () => carregarTvs().then(renderizar));
 $("#btn-tema").addEventListener("click", () => {
   const raiz = document.documentElement;
   const escuroAtual = raiz.dataset.theme

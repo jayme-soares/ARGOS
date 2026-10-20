@@ -1,34 +1,40 @@
 "use strict";
 
 // ARGOS — modo TV (/tv). Tela fixa para a sala de reuniões: lê o mesmo
-// snapshot do painel (pelo /api/tv, com a chave da TV) a cada 60s, recalcula
-// as cores a cada segundo e passa as páginas da lista sozinha.
+// snapshot do painel (pelo /api/tv) a cada 60s, recalcula as cores a cada
+// segundo e passa as páginas da lista sozinha.
 //
-// Parâmetros da URL:
-//   chave=...        obrigatória (ARGOS_TV_CHAVE no Vercel)
-//   contrato=soc     ou negociacao
-//   co=Angra,Volta   Negociação: só esses COs (nome curto ou completo)
-//   tema=claro       o padrão é escuro
-//   zoom=1.1         aumenta/diminui tudo (padrão 1)
+// Pareamento por PIN, sem digitar nada na TV: na primeira vez a tela mostra
+// um código de 6 dígitos; um admin digita o código no painel (aba TVs) e
+// escolhe o contrato, o tema, o zoom e os COs. A TV guarda o token dela no
+// navegador e segue pareada até ser removida no painel.
 //
 // Escrito sem ?., ??, replaceAll, Object.fromEntries e afins: o navegador
 // das TVs Samsung mais antigas é um Chromium de 2019.
 
 var TZ = "America/Sao_Paulo";
 var INTERVALO_BUSCA_MS = 60000;
+var INTERVALO_PAREAMENTO_MS = 3000;
 var INTERVALO_PAGINA_MS = 15000;
 var RECARREGAR_MS = 3 * 3600000;  // pega versões novas do painel e limpa a memória
+var CHAVE_TOKEN = "argos.tv.token";
 var NOMES_CONTRATO = { soc: "SOC · Maricá", negociacao: "Negociação" };
 
-var params = new URLSearchParams(location.search);
-var CHAVE = params.get("chave") || "";
-var CONTRATO = NOMES_CONTRATO[params.get("contrato")] ? params.get("contrato") : "soc";
-var FILTRO_CO = (params.get("co") || "").split(",").map(function (c) { return c.trim().toLowerCase(); }).filter(Boolean);
-if (params.get("tema") === "claro") document.documentElement.setAttribute("data-theme", "light");
-var ZOOM = Number(params.get("zoom")) || 1;
-document.documentElement.style.fontSize = (0.9 * ZOOM) + "vw";
+// Definidos pelo admin no painel (vêm com o snapshot).
+var CONTRATO = "soc";
+var FILTRO_CO = [];
+
+function lerToken() { try { return localStorage.getItem(CHAVE_TOKEN); } catch (e) { return null; } }
+function gravarToken(t) {
+  try { if (t) localStorage.setItem(CHAVE_TOKEN, t); else localStorage.removeItem(CHAVE_TOKEN); } catch (e) { /* fica só na memória */ }
+}
 
 var estado = {
+  token: lerToken(),
+  pareada: false,
+  pin: null,
+  pinExpira: null,
+  tv: null,             // nome, contrato e config definidos no painel
   snapshot: null,
   ultimoErro: null,
   ultimaLeitura: null,  // quando a TV leu o snapshot pela última vez
@@ -142,30 +148,97 @@ function noFiltroCo(r) {
 // ------------------------------------------------------------------
 // API
 // ------------------------------------------------------------------
-function bloquear(texto) {
-  $("#bloqueio-texto").textContent = texto;
-  $("#bloqueio").hidden = false;
+async function chamarApi(metodo) {
+  var r = await fetch("/api/tv", {
+    method: metodo, headers: estado.token ? { "X-Argos-Tv": estado.token } : {}, cache: "no-store",
+  });
+  var servidor = data(r.headers.get("date"));
+  if (servidor) estado.offset = servidor - Date.now();
+  var corpo = {};
+  try { corpo = await r.json(); } catch (e) { corpo = {}; }
+  return { status: r.status, ok: r.ok, corpo: corpo };
 }
 
-async function buscarSnapshot() {
+// Tela do PIN (TV ainda não pareada, ou removida no painel).
+function mostrarPin(texto) {
+  estado.pareada = false;
+  $("#tela").hidden = true;
+  $("#pareamento").hidden = false;
+  $("#pin").textContent = estado.pin ? estado.pin.slice(0, 3) + " " + estado.pin.slice(3) : "··· ···";
+  $("#pin-erro").textContent = texto || "";
+  $("#pin-endereco").textContent = location.host;
+  renderValidadePin();
+}
+function renderValidadePin() {
+  var el = $("#pin-validade");
+  if (!estado.pinExpira) { el.textContent = ""; return; }
+  var resta = estado.pinExpira - agoraCorrigido();
+  el.textContent = resta > 0 ? "Código válido por " + cronometro(resta).slice(3) : "Gerando um código novo…";
+}
+
+async function novoPin() {
+  estado.token = null;
+  gravarToken(null);
+  var r = await chamarApi("POST");
+  if (!r.ok) throw new Error(r.corpo.erro || "Erro " + r.status);
+  estado.token = r.corpo.token;
+  gravarToken(estado.token);
+  estado.pin = r.corpo.pin;
+  estado.pinExpira = data(r.corpo.expira_em);
+  mostrarPin();
+}
+
+function aplicarConfig(tv) {
+  var cfg = (tv && tv.config) || {};
+  CONTRATO = NOMES_CONTRATO[tv && tv.contrato] ? tv.contrato : "soc";
+  FILTRO_CO = (cfg.cos || []).map(function (c) { return String(c).trim().toLowerCase(); }).filter(Boolean);
+  if (cfg.tema === "claro") document.documentElement.setAttribute("data-theme", "light");
+  else document.documentElement.setAttribute("data-theme", "dark");
+  document.documentElement.style.fontSize = (0.9 * (Number(cfg.zoom) || 1)) + "vw";
+}
+
+// Uma volta: pede o PIN, espera o pareamento ou lê o snapshot. Devolve
+// quanto esperar até a próxima volta.
+async function ciclo() {
   try {
-    var r = await fetch("/api/tv?contrato=" + encodeURIComponent(CONTRATO), {
-      headers: { "X-Argos-Tv": CHAVE }, cache: "no-store",
-    });
-    var servidor = data(r.headers.get("date"));
-    if (servidor) estado.offset = servidor - Date.now();
-    var corpo = {};
-    try { corpo = await r.json(); } catch (e) { corpo = {}; }
-    if (r.status === 401) { bloquear("A chave desta TV não é válida (ou foi trocada). Confira o endereço com o administrador do ARGOS."); return; }
-    if (!r.ok) throw new Error(corpo.erro || "Erro " + r.status);
-    $("#bloqueio").hidden = true;
-    estado.snapshot = corpo;
-    estado.ultimoErro = null;
+    if (!estado.token) { await novoPin(); return INTERVALO_PAREAMENTO_MS; }
+    var r = await chamarApi("GET");
+    if (r.status === 401) { await novoPin(); return INTERVALO_PAREAMENTO_MS; }  // removida no painel, ou PIN expirou
+    if (!r.ok) throw new Error(r.corpo.erro || "Erro " + r.status);
+    if (r.corpo.status === "pendente") {
+      estado.pin = r.corpo.pin;
+      estado.pinExpira = data(r.corpo.expira_em);
+      mostrarPin();
+      return INTERVALO_PAREAMENTO_MS;
+    }
+    estado.tv = r.corpo.tv;
+    aplicarConfig(estado.tv);
+    estado.snapshot = r.corpo.snapshot;
+    estado.ultimoErro = r.corpo.snapshot ? null : "o bot ainda não publicou nenhum dado";
     estado.ultimaLeitura = agoraCorrigido();
+    estado.pareada = true;
+    $("#pareamento").hidden = true;
+    $("#tela").hidden = false;
+    renderizar();
+    return INTERVALO_BUSCA_MS;
   } catch (e) {
     estado.ultimoErro = (e && e.message) || String(e);
+    if (!estado.pareada) { mostrarPin("Sem conexão com o ARGOS (" + estado.ultimoErro + "). Tentando de novo…"); return 10000; }
+    renderizar();
+    return 15000;
   }
-  renderizar();
+}
+
+// Uma volta por vez: chamar de novo (ex.: a TV voltou do standby) adianta a próxima.
+var proximaVolta = null;
+var emVolta = false;
+async function loop() {
+  clearTimeout(proximaVolta);
+  if (emVolta) return;
+  emVolta = true;
+  var espera = await ciclo();
+  emVolta = false;
+  proximaVolta = setTimeout(loop, espera);
 }
 
 // ------------------------------------------------------------------
@@ -406,7 +479,7 @@ function renderizar() {
   var agora = agoraCorrigido();
   var d = dados(agora);
   var nome = NOMES_CONTRATO[CONTRATO];
-  $("#subtitulo").textContent = "Religações · " + nome;
+  $("#subtitulo").textContent = "Religações · " + nome + (estado.tv && estado.tv.nome ? " · " + estado.tv.nome : "");
   document.title = "ARGOS · TV · " + nome;
   renderRelogio(agora);
   renderStatus(d.snap);
@@ -426,6 +499,7 @@ function renderizar() {
 
 // A cada segundo: relógio e contagem regressiva. Ao zerar, redesenha tudo.
 function tique() {
+  if (!estado.pareada) { renderValidadePin(); return; }
   var agora = agoraCorrigido();
   renderRelogio(agora);
   var els = document.querySelectorAll("[data-contagem-ate]");
@@ -442,25 +516,20 @@ async function manterAcesa() {
 }
 
 function iniciar() {
-  if (!CHAVE) {
-    bloquear("Falta a chave da TV no endereço. Use /tv?chave=… (o administrador do ARGOS tem o link completo).");
-    return;
-  }
-  renderizar();
-  buscarSnapshot();
-  setInterval(buscarSnapshot, INTERVALO_BUSCA_MS);
   setInterval(tique, 1000);
-  setInterval(function () { estado.pagina++; renderizar(); }, INTERVALO_PAGINA_MS);
-  // Recarrega a página de tempos em tempos, só se o servidor estiver respondendo.
+  setInterval(function () { if (estado.pareada) { estado.pagina++; renderizar(); } }, INTERVALO_PAGINA_MS);
+  // Recarrega a página de tempos em tempos, só se o servidor estiver
+  // respondendo e o token tiver ficado guardado (senão a TV perderia o pareamento).
   setTimeout(function recarregar() {
-    if (!estado.ultimoErro) location.reload();
+    if (!estado.ultimoErro && estado.pareada && lerToken() === estado.token) location.reload();
     else setTimeout(recarregar, 60000);
   }, RECARREGAR_MS);
-  window.addEventListener("resize", function () { renderizar(); });
+  window.addEventListener("resize", function () { if (estado.pareada) renderizar(); });
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible") { manterAcesa(); buscarSnapshot(); }
+    if (document.visibilityState === "visible") { manterAcesa(); loop(); }
   });
   manterAcesa();
+  loop();
 }
 
 iniciar();
