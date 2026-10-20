@@ -82,7 +82,7 @@ Cada equipe recebe só as próprias ordens, e cada aviso precisa ser confirmado 
 | `argos/avisos_equipe.py` | Avisos às equipes: designação, vencimento, reenvio dos não confirmados |
 | `argos/notificacao.py` / `argos/webpush.py` | Envio dos pushes: ntfy e Web Push do painel |
 | `argos/publicador.py` | Snapshot JSON: grava em `/data/snapshot.json` e publica no Upstash |
-| `web/` | Painel (Vercel). HTML/CSS/JS puro, sem build. `index.html` + `app.js` é o painel da gestão; `equipe.html` + `equipe.js` é o das equipes; `comum.js` é compartilhado |
+| `web/` | Painel (Vercel). HTML/CSS/JS puro, sem build. `index.html` + `app.js` é o painel da gestão; `equipe.html` + `equipe.js` é o das equipes; `comum.js` é compartilhado; `tv.html` + `tv.js` é o modo TV |
 | `tests/` | Testes da planilha e dos alertas |
 
 O estado fica no volume `/data`: `programaveis.json`, `alertas.json` (em campo), `alertas_programaveis.json`, `designacoes.json` (equipe de cada ordem na última exportação), `snapshot.json`, `downloads/` e `debug/`, onde ficam os screenshots de erro. Os arquivos da Negociação ficam em `/data/negociacao/`, com os mesmos nomes. Por isso um restart do container não repete pushes.
@@ -240,9 +240,21 @@ Na primeira exportação depois da atualização, o bot só registra a equipe de
    - `SUPABASE_URL`: em Project Settings → API
    - `SUPABASE_ANON_KEY`: a chave **anon/public**.
    - `SUPABASE_SERVICE_ROLE_KEY`: a chave **service_role**, só para as contas das equipes (ver acima). É usada apenas no servidor, nas funções `/api/*`.
+   - `ARGOS_TV_CHAVE`: opcional, só para o [modo TV](#modo-tv-tv).
 3. Faça o deploy. Coloque a URL gerada em `ARGOS_PAINEL_URL` no `.env` da VPS, para que tocar no push abra o painel.
 
 Para testar localmente: `cd web && npx vercel dev`, com as mesmas variáveis num `web/.env.local`.
+
+### Modo TV (`/tv`)
+
+Tela fixa para a TV da sala de reuniões, sem login: indicadores, a lista em campo por vencimento (as páginas passam sozinhas a cada 15s), o próximo vencimento, o resumo por equipe e as programáveis. Lê o mesmo snapshot do painel a cada 60s. Não mostra nome, endereço nem código do cliente: o `/api/tv` já corta esses campos no servidor.
+
+1. No Vercel, crie a variável `ARGOS_TV_CHAVE` com um valor longo e aleatório (por exemplo, `openssl rand -hex 24`) e faça o redeploy. Para trocar a chave sem derrubar a TV, ponha a nova e a antiga separadas por vírgula e tire a antiga depois. Apagar a variável desliga o modo TV.
+2. No navegador da TV, abra `https://<painel>/tv?chave=<chave>` e salve nos favoritos.
+
+Outros parâmetros: `contrato=negociacao` (o padrão é a SOC), `co=Angra,Volta Redonda` (Negociação: só esses COs), `tema=claro` (o padrão é escuro) e `zoom=1.2` (aumenta ou diminui tudo).
+
+Na TV Samsung, desligue a proteção de tela e o desligamento automático (Configurações → Geral → Gerenciador do sistema / Solução Eco), senão ela apaga a tela depois de um tempo sem uso do controle.
 
 ## Notificações
 

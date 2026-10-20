@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1118">
+  <title>ARGOS · TV</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="tv.css">
+</head>
+<body>
+  <!-- Modo TV: tela fixa para a sala de reuniões, sem login e sem interação.
+       Entra pela chave da TV: /tv?chave=...&contrato=soc|negociacao (ver api/tv.js). -->
+  <div class="tela" id="tela">
+    <header class="topo">
+      <div class="marca">
+        <span class="marca-ponto"></span>
+        <span class="marca-nome">ARGOS</span>
+        <span class="marca-sub" id="subtitulo">Religações</span>
+      </div>
+      <div class="status" id="status"></div>
+      <div class="relogio">
+        <span class="relogio-hora num" id="relogio-hora">--:--</span>
+        <span class="relogio-data" id="relogio-data"></span>
+      </div>
+    </header>
+
+    <div class="avisos" id="avisos"></div>
+
+    <section class="kpis" id="kpis"></section>
+
+    <main class="corpo">
+      <section class="quadro lista">
+        <div class="quadro-titulo">
+          <h2>Em campo · por vencimento</h2>
+          <span class="pagina" id="pagina"></span>
+        </div>
+        <div class="lista-area" id="lista-area">
+          <table class="tabela">
+            <thead id="tabela-cabecalho"></thead>
+            <tbody id="tabela-corpo"></tbody>
+          </table>
+          <p class="vazio" id="vazio" hidden></p>
+        </div>
+      </section>
+
+      <aside class="lateral">
+        <section class="quadro proximo" id="proximo"></section>
+        <section class="quadro equipes">
+          <div class="quadro-titulo"><h2>Por equipe</h2><span class="pagina" id="equipes-extra"></span></div>
+          <div class="equipes-area" id="equipes-area"><div id="equipes"></div></div>
+        </section>
+        <section class="quadro programaveis">
+          <div class="quadro-titulo"><h2>Programáveis</h2><span class="pagina" id="prog-total"></span></div>
+          <div id="programaveis"></div>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="rodape" id="rodape"></footer>
+  </div>
+
+  <div class="bloqueio" id="bloqueio" hidden>
+    <div class="bloqueio-card">
+      <div class="marca"><span class="marca-ponto"></span><span class="marca-nome">ARGOS</span></div>
+      <p id="bloqueio-texto"></p>
+    </div>
+  </div>
+
+  <script src="tv.js"></script>
+</body>
+</html>

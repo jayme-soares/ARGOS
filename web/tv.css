@@ -1,0 +1,156 @@
+/* ARGOS — modo TV. Feito para 1920x1080 visto de longe e para o navegador
+   das TVs Samsung (Chromium antigo): sem color-mix, sem gap em flex, sem
+   inset. O tamanho de tudo sai de rem, e o rem sai da largura da tela
+   (tv.js ajusta com ?zoom=). */
+:root {
+  --bg: #0b1118;
+  --bg-elev: #141d27;
+  --bg-sunk: #0f1720;
+  --borda: #243140;
+  --texto: #eef2f6;
+  --texto-2: #a3afbd;
+  --texto-3: #6f7c8c;
+  --marca: #e8b64c;
+
+  --vencida: #ff5f5f;
+  --vencida-bg: rgba(255, 95, 95, .16);
+  --critico: #ff9a4d;
+  --critico-bg: rgba(255, 154, 77, .14);
+  --alerta: #f2c94c;
+  --alerta-bg: rgba(242, 201, 76, .13);
+  --atencao: #6aa5ff;
+  --atencao-bg: rgba(106, 165, 255, .13);
+  --ok: #4cc38a;
+  --ok-bg: rgba(76, 195, 138, .12);
+  --sem: #6f7c8c;
+  --sem-bg: rgba(111, 124, 140, .14);
+
+  --raio: .7rem;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --sans: "IBM Plex Sans", "Samsung One", system-ui, "Segoe UI", Roboto, sans-serif;
+  font-size: .9vw;
+}
+:root[data-theme="light"] {
+  --bg: #eef0f3;
+  --bg-elev: #ffffff;
+  --bg-sunk: #f4f5f7;
+  --borda: #d9dde4;
+  --texto: #121a24;
+  --texto-2: #4f5967;
+  --texto-3: #848d9a;
+  --marca: #b8861b;
+  --vencida: #d02f2f;
+  --vencida-bg: #fde7e7;
+  --critico: #d9661a;
+  --critico-bg: #fdeee2;
+  --alerta: #a27c05;
+  --alerta-bg: #fbf3d6;
+  --atencao: #2a64c4;
+  --atencao-bg: #e5eefb;
+  --ok: #2a8a53;
+  --ok-bg: #e2f3e9;
+  --sem: #848d9a;
+  --sem-bg: #eceef2;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { background: var(--bg); color: var(--texto); font-family: var(--sans); font-size: 1rem; line-height: 1.3; cursor: none; }
+[hidden] { display: none !important; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+h2 { margin: 0; font-size: 1.05rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--texto-2); }
+
+.tela { display: flex; flex-direction: column; height: 100vh; padding: 1.1rem 1.4rem 0; }
+
+/* ---------- topo ---------- */
+.topo { display: flex; align-items: center; padding-bottom: .9rem; }
+.marca { display: flex; align-items: center; }
+.marca-ponto { width: 1.1rem; height: 1.1rem; border-radius: 50%; background: var(--marca); margin-right: .6rem; box-shadow: 0 0 0 .3rem rgba(232, 182, 76, .2); }
+.marca-nome { font-weight: 700; font-size: 1.7rem; letter-spacing: .14em; }
+.marca-sub { margin-left: 1rem; padding-left: 1rem; border-left: 1px solid var(--borda); font-size: 1.35rem; color: var(--texto-2); }
+.status { display: flex; margin-left: auto; margin-right: 2rem; }
+.pill { display: inline-flex; align-items: center; margin-left: .8rem; padding: .35rem .9rem; border-radius: 999px; background: var(--bg-elev); border: 1px solid var(--borda); font-size: .95rem; color: var(--texto-2); }
+.pill b { color: var(--texto); font-weight: 600; margin-right: .4rem; }
+.ponto { width: .7rem; height: .7rem; border-radius: 50%; margin-right: .55rem; background: var(--sem); }
+.ponto.ok { background: var(--ok); }
+.ponto.erro { background: var(--vencida); }
+.ponto.parcial, .ponto.ocupado { background: var(--alerta); }
+.relogio { display: flex; flex-direction: column; align-items: flex-end; }
+.relogio-hora { font-size: 2.4rem; font-weight: 600; line-height: 1; }
+.relogio-data { font-size: .95rem; color: var(--texto-2); margin-top: .2rem; }
+
+/* ---------- avisos ---------- */
+.avisos:empty { display: none; }
+.avisos { margin-bottom: .8rem; }
+.aviso { padding: .55rem 1rem; border-radius: var(--raio); background: var(--alerta-bg); color: var(--alerta); font-size: 1.05rem; font-weight: 500; margin-bottom: .4rem; }
+.aviso.erro { background: var(--vencida-bg); color: var(--vencida); }
+.aviso.info { background: var(--sem-bg); color: var(--texto-2); }
+
+/* ---------- indicadores ---------- */
+.kpis { display: grid; grid-template-columns: repeat(7, 1fr); grid-gap: .8rem; gap: .8rem; margin-bottom: .9rem; }
+.kpi { background: var(--bg-elev); border: 1px solid var(--borda); border-radius: var(--raio); padding: .8rem 1rem .75rem; border-top: .3rem solid var(--cor, var(--borda)); }
+.kpi .rotulo { font-size: .95rem; color: var(--texto-2); font-weight: 500; }
+.kpi .valor { font-family: var(--mono); font-size: 3.3rem; font-weight: 600; line-height: 1.1; color: var(--cor, var(--texto)); }
+.kpi.zero .valor { color: var(--texto-3); }
+.kpi .detalhe { font-size: .85rem; color: var(--texto-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi.piscando { animation: piscar 1.6s ease-in-out infinite; }
+@keyframes piscar { 50% { background: var(--vencida-bg); } }
+
+/* ---------- corpo ---------- */
+.corpo { flex: 1; min-height: 0; display: grid; grid-template-columns: 2.15fr 1fr; grid-gap: .9rem; gap: .9rem; }
+.quadro { background: var(--bg-elev); border: 1px solid var(--borda); border-radius: var(--raio); padding: .8rem 1rem; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.quadro-titulo { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: .5rem; }
+.pagina { font-size: .95rem; color: var(--texto-3); font-family: var(--mono); }
+.lateral { display: grid; grid-template-rows: auto 1fr auto; grid-gap: .9rem; gap: .9rem; min-height: 0; }
+
+/* tabela */
+.lista-area { flex: 1; min-height: 0; overflow: hidden; }
+.tabela { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.tabela th { text-align: left; font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--texto-3); padding: 0 .6rem .45rem; border-bottom: 1px solid var(--borda); }
+.tabela td { height: 2.75rem; padding: 0 .6rem; border-bottom: 1px solid var(--borda); font-size: 1.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabela tr td:first-child { border-left: .3rem solid var(--cor, transparent); }
+.tabela tr.u-vencida td { background: var(--vencida-bg); }
+.secundario { color: var(--texto-2); }
+.fraco { color: var(--texto-3); }
+.badge { display: inline-block; padding: .2rem .7rem; border-radius: 999px; font-family: var(--mono); font-size: 1.05rem; font-weight: 600; color: var(--cor); background: var(--cor-bg); }
+.u-vencida .badge { background: var(--vencida); color: #fff; }
+.u-vencida { --cor: var(--vencida); --cor-bg: var(--vencida-bg); }
+.u-critico { --cor: var(--critico); --cor-bg: var(--critico-bg); }
+.u-alerta { --cor: var(--alerta); --cor-bg: var(--alerta-bg); }
+.u-atencao { --cor: var(--atencao); --cor-bg: var(--atencao-bg); }
+.u-ok { --cor: var(--ok); --cor-bg: var(--ok-bg); }
+.u-sem { --cor: var(--sem); --cor-bg: var(--sem-bg); }
+.vazio { margin: 0; padding: 3rem 1rem; text-align: center; font-size: 1.5rem; color: var(--texto-3); }
+
+/* próximo vencimento */
+.proximo { border-left: .35rem solid var(--cor, var(--borda)); }
+.proximo-rotulo { font-size: .95rem; color: var(--texto-2); font-weight: 500; }
+.proximo-valor { font-family: var(--mono); font-size: 3.6rem; font-weight: 600; line-height: 1.1; color: var(--cor, var(--texto)); }
+.proximo-detalhe { font-size: 1rem; color: var(--texto-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* por equipe */
+.equipes-area { flex: 1; min-height: 0; overflow: hidden; }
+.eq { display: flex; align-items: center; height: 2.6rem; border-bottom: 1px solid var(--borda); border-left: .3rem solid var(--cor, transparent); padding-left: .6rem; }
+.eq-nome { flex: 1; min-width: 0; font-size: 1.1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eq-num { font-family: var(--mono); font-size: 1.1rem; min-width: 3.2rem; text-align: right; }
+.eq-num.vencidas { color: var(--vencida); font-weight: 600; }
+.eq-prox { font-family: var(--mono); font-size: 1rem; color: var(--cor, var(--texto-2)); min-width: 6.5rem; text-align: right; }
+.eq.cabecalho { height: 1.8rem; border-left-color: transparent; font-size: .8rem; color: var(--texto-3); text-transform: uppercase; letter-spacing: .06em; }
+.eq.cabecalho .eq-num, .eq.cabecalho .eq-prox, .eq.cabecalho .eq-nome { font-family: var(--sans); font-size: .8rem; color: var(--texto-3); font-weight: 600; }
+
+/* programáveis */
+.prog { display: flex; align-items: center; height: 2.4rem; border-bottom: 1px solid var(--borda); }
+.prog:last-child { border-bottom: 0; }
+.prog .badge { font-size: .95rem; margin-right: .7rem; }
+.prog-tdc { font-family: var(--mono); font-size: 1.05rem; }
+.prog-venc { margin-left: auto; font-family: var(--mono); font-size: 1rem; color: var(--texto-2); }
+
+/* rodapé */
+.rodape { display: flex; justify-content: space-between; padding: .55rem .2rem .7rem; font-size: .9rem; color: var(--texto-3); }
+.rodape span + span { margin-left: 2rem; }
+
+/* tela de bloqueio (sem chave / chave inválida) */
+.bloqueio { position: fixed; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+.bloqueio-card { max-width: 46rem; text-align: center; }
+.bloqueio-card .marca { justify-content: center; margin-bottom: 1.5rem; }
+.bloqueio-card p { font-size: 1.5rem; color: var(--texto-2); line-height: 1.5; }
