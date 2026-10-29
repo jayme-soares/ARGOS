@@ -170,7 +170,11 @@ class MonitorProgramaveis(threading.Thread):
                 falhas.append(co.nome)
                 log(f"ERRO no CO {co.nome}: {str(e).splitlines()[0]}", self.PREFIXO)
                 debug_screenshot(driver, f"erro_programaveis_{self.contrato.id}_{co.value}")
-                self._co_atual = None
+                # Tela desconhecida: a próxima troca reloga antes. (None é só
+                # para a sessão recém-aberta, que já está no Menu Principal;
+                # com None a troca seguinte partia da tela quebrada e perdia
+                # 120s esperando a aba antes de relogar.)
+                self._co_atual = ""
                 regs = [r for r in anteriores.values() if r.get("co") == co.nome]
                 total, co_parcial = len(regs), True
             registros += regs
@@ -284,8 +288,9 @@ class MonitorProgramaveis(threading.Thread):
         sessão (o próximo ciclo abre um Chrome novo)."""
         driver = None
         falhas_consecutivas = 0
-        # Com vários COs a volta já leva minutos; não precisa esperar mais.
-        intervalo = config.INTERVALO_PROGRAMAVEIS_SEGUNDOS if len(self.cos) == 1 else 5
+        # Com vários COs a volta já leva minutos; a pausa é só para aliviar
+        # a CPU entre uma volta e outra.
+        intervalo = config.INTERVALO_PROGRAMAVEIS_SEGUNDOS if len(self.cos) == 1 else config.PAUSA_VOLTA_PROGRAMAVEIS_SEGUNDOS
         try:
             while True:
                 if not dentro_da_janela_permitida():
@@ -399,7 +404,10 @@ class MonitorCampo(threading.Thread):
         self.pasta_download = config.DOWNLOAD_DIR if contrato.id == "soc" else config.DOWNLOAD_DIR / contrato.id
         super().__init__(name=self.NOME, daemon=True)
         self.dados = _CampoContrato(contrato)
-        self.proxima_extracao = _agora()  # exporta assim que entrar na janela
+        # Exporta assim que entrar na janela; os outros contratos começam
+        # defasados da SOC para os picos de CPU não coincidirem.
+        defasagem = 0 if contrato.id == "soc" else config.DEFASAGEM_CAMPO_MINUTOS
+        self.proxima_extracao = _agora() + timedelta(minutes=defasagem)
 
     def _status(self, estado):
         saude.atualizar_status(self.NOME, estado, chave="campo", contratos=(self.contrato,))
@@ -493,6 +501,7 @@ class MonitorCampo(threading.Thread):
         return True
 
     def ciclo_exportacao(self):
+        inicio = _agora()
         log("Iniciando exportação da Busca TdC.", self.PREFIXO)
         try:
             with _acesso_eorder(self.NOME):
@@ -516,7 +525,9 @@ class MonitorCampo(threading.Thread):
         # Um CO falhando de vez não pode fazer o ciclo inteiro (11 exportações
         # na Negociação) rodar a cada 5 min: a retentativa curta é só quando
         # nada foi lido.
-        self.proxima_extracao = agora + timedelta(minutes=config.INTERVALO_CAMPO_MINUTOS)
+        # Conta do início do ciclo: o ritmo fica fixo (SOC a cada 30 min, não
+        # 30 + duração) e a defasagem entre os contratos se mantém.
+        self.proxima_extracao = inicio + timedelta(minutes=config.INTERVALO_CAMPO_MINUTOS)
         log(f"Próxima exportação às {self.proxima_extracao:%H:%M}.", self.PREFIXO)
         self._publicar(d)
         self._status(f"erro parcial: {', '.join(d.cos_com_erro)}" if d.cos_com_erro else "ok")

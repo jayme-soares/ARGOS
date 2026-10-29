@@ -22,6 +22,7 @@ from argos.eorder.ui import (
     esperar_e_clicar_visivel,
     normalizar_texto,
 )
+from argos.log import log
 
 
 def proximo_dia_util(a_partir_de: datetime, dias_uteis: int = 1) -> datetime:
@@ -116,6 +117,13 @@ def _selecionar(driver, nome, valor, timeout=config.WAIT_TIMEOUT):
             time.sleep(1)
 
 
+def _valor_select(driver, nome) -> str | None:
+    try:
+        return encontrar_elemento_visivel(driver, By.NAME, nome, timeout=5).get_attribute("value")
+    except Exception:
+        return None
+
+
 def _digitar(driver, nome, texto, timeout=20):
     """Limpa e preenche o campo visível `nome`, tentando de novo enquanto o
     GWT ainda o recria ("not interactable" / stale)."""
@@ -134,12 +142,19 @@ def _digitar(driver, nome, texto, timeout=20):
 
 def preencher_busca(driver, prazo_final: datetime, busca_value: str | None = None):
     # Busca salva — encontrar_elemento_visivel porque o GWT mantém campos de
-    # OUTRAS abas escondidos no DOM com o mesmo `name`.
-    _selecionar(driver, "_lyXWFMARSAID", busca_value or config.SAVED_SEARCH_VALUE)
-
-    # Selecionar a busca salva recarrega o formulário com os critérios dela;
-    # antes disso os campos aparecem mas não aceitam digitação.
-    time.sleep(3)
+    # OUTRAS abas escondidos no DOM com o mesmo `name`. Logo depois de trocar
+    # de CO o GWT ainda pode redesenhar o formulário e apagar a escolha (a
+    # busca fica vazia, "Datas" fechada e o prazo nunca aparece): confere e
+    # escolhe de novo.
+    busca = busca_value or config.SAVED_SEARCH_VALUE
+    for tentativa in range(1, 4):
+        _selecionar(driver, "_lyXWFMARSAID", busca)
+        # Selecionar a busca salva recarrega o formulário com os critérios
+        # dela; antes disso os campos aparecem mas não aceitam digitação.
+        time.sleep(3)
+        if _valor_select(driver, "_lyXWFMARSAID") == busca:
+            break
+        log(f"Busca salva {busca} não ficou selecionada (tentativa {tentativa}); escolhendo de novo.", "PROGRAMÁVEIS")
 
     # "Prazo ANS Legal - A" (data e hora). A seção "Datas" abre e fecha a
     # cada clique e cada busca salva guarda o próprio estado: só clica se o

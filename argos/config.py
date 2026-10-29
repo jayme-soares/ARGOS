@@ -88,6 +88,10 @@ SAVED_SEARCH_VALUE = "52224"
 DIAS_UTEIS_PRAZO = _env_int("ARGOS_DIAS_UTEIS_PRAZO", 2)
 
 INTERVALO_PROGRAMAVEIS_SEGUNDOS = _env_int("ARGOS_INTERVALO_PROGRAMAVEIS_SEG", 60)
+# Programáveis com vários COs (Negociação): pausa entre uma volta completa e
+# a próxima. Sem ela o Chrome trabalha sem parar e disputa a CPU da VPS com a
+# SOC e as exportações.
+PAUSA_VOLTA_PROGRAMAVEIS_SEGUNDOS = _env_int("ARGOS_PAUSA_VOLTA_PROGRAMAVEIS_SEG", 180)
 
 # --- Em campo (Busca TdC) ---
 FILTRO_CAMPO = _env_str("ARGOS_FILTRO_CAMPO", "PARCIAL RELIGA CENEGED - MARICÁ")
@@ -118,6 +122,14 @@ ID_DATA_LANCAMENTO_FIM = _env_str("ARGOS_ID_DATA_LANC_FIM", "698247")
 # cada "Atualizar" da lista.
 EXPORTACAO_TIMEOUT_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_TIMEOUT_SEG", 15 * 60)
 EXPORTACAO_POLLING_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_POLLING_SEG", 30)
+# O eOrder às vezes aceita o pedido e nunca gera o arquivo. Se exportações
+# pedidas depois já estão na lista há esse tempo e esta não, desiste dela
+# (em vez de segurar o ciclo pelo EXPORTACAO_TIMEOUT_SEGUNDOS inteiro).
+EXPORTACAO_PERDIDA_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_PERDIDA_SEG", 180)
+# Atraso da primeira exportação de campo dos contratos além da SOC, para os
+# picos (login + exportações) não coincidirem com os da SOC. Os ciclos
+# seguintes contam do início do anterior, então o desencontro se mantém.
+DEFASAGEM_CAMPO_MINUTOS = _env_int("ARGOS_DEFASAGEM_CAMPO_MIN", 15)
 
 # --- Contratos (ver argos/contratos.py) ---
 # CO da SOC no combo da Busca TdC (o filtro salvo traz todos os COs, mas a

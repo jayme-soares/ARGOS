@@ -358,13 +358,28 @@ def esperar_download(pasta: Path, antes: set[str], timeout: float, progresso=_na
     return None
 
 
+def _alguma_visivel(driver, xpath) -> bool:
+    for el in driver.find_elements(By.XPATH, xpath):
+        try:
+            if el.is_displayed():
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def baixar_exportacao(driver, nome_exportacao: str, progresso=_nada, pasta: Path | None = None,
-                      prefixo: str = PREFIXO_LOG) -> Path:
+                      prefixo: str = PREFIXO_LOG, posteriores: list[str] = ()) -> Path:
     """Faz polling da Lista de exportação até a linha com `nome_exportacao`
-    aparecer, dá duplo clique para baixar e confirma o arquivo na pasta."""
+    aparecer, dá duplo clique para baixar e confirma o arquivo na pasta.
+
+    `posteriores`: exportações pedidas depois desta. Se alguma já está na
+    lista há EXPORTACAO_PERDIDA_SEGUNDOS e esta não, o eOrder a perdeu."""
     pasta = pasta or config.DOWNLOAD_DIR
     fim = time.time() + config.EXPORTACAO_TIMEOUT_SEGUNDOS
     xpath_linha = f"//td[contains(., '{nome_exportacao}')]/.."
+    xpath_posteriores = "//td[" + " or ".join(f"contains(., '{n}')" for n in posteriores) + "]" if posteriores else None
+    posterior_vista_em = None
     while time.time() < fim:
         progresso("aguardando_exportacao")
         linha = None
@@ -387,6 +402,14 @@ def baixar_exportacao(driver, nome_exportacao: str, progresso=_nada, pasta: Path
                 return arquivo
             log("Exportação listada, mas o download não começou (talvez ainda processando).", prefixo)
         else:
+            if xpath_posteriores and posterior_vista_em is None and _alguma_visivel(driver, xpath_posteriores):
+                posterior_vista_em = time.time()
+            if posterior_vista_em is not None and time.time() - posterior_vista_em >= config.EXPORTACAO_PERDIDA_SEGUNDOS:
+                debug_screenshot(driver, "exportacao_perdida")
+                raise TimeoutError(
+                    f"A exportação '{nome_exportacao}' não apareceu na lista, mas as pedidas depois dela já "
+                    f"estão lá há {config.EXPORTACAO_PERDIDA_SEGUNDOS}s: o eOrder provavelmente a perdeu."
+                )
             log(f"Exportação ainda não disponível; nova verificação em {config.EXPORTACAO_POLLING_SEGUNDOS}s.", prefixo)
 
         time.sleep(config.EXPORTACAO_POLLING_SEGUNDOS)
@@ -457,9 +480,11 @@ def exportar_cos(driver, cos: list[str], progresso=_nada, pasta: Path | None = N
         if len(cos) > 1:
             login(driver)
         abrir_lista_exportacao(driver)
-    for co, nome in nomes.items():
+    pedidos = list(nomes.values())
+    for i, (co, nome) in enumerate(nomes.items()):
         try:
-            arquivo = baixar_exportacao(driver, nome, progresso=progresso, pasta=pasta, prefixo=prefixo)
+            arquivo = baixar_exportacao(driver, nome, progresso=progresso, pasta=pasta, prefixo=prefixo,
+                                        posteriores=pedidos[i + 1:])
             log(f"Planilha de {co} baixada: {arquivo.name} ({arquivo.stat().st_size} bytes)", prefixo)
             resultado[co] = arquivo
         except Exception as e:
