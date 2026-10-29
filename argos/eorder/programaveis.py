@@ -55,7 +55,19 @@ def filtrar_municipio(registros: list[dict], municipio: str | None = None) -> li
 def abrir_plano_diario(driver):
     """Menu lateral: Planejamento > Plano Diário. "Planejamento" abre e fecha
     o submenu a cada clique: se ele já está aberto (ex.: troca de CO), clicar
-    de novo esconde o "Plano Diário"."""
+    de novo esconde o "Plano Diário".
+
+    Com a sessão viva (voltar_ao_menu) o submenu já vem aberto, mas ainda se
+    mexendo enquanto a tela monta: um clique comum caía no item de baixo
+    (Busca Execução). Por isso espera assentar, clica via JS (no elemento,
+    não na coordenada) e confere que o combo de CO do Plano Diário abriu."""
+    time.sleep(2)
+    try:
+        esperar_e_clicar_visivel(driver, "//div[not(*) and normalize-space(.)='Plano Diário']", timeout=5, via_js=True)
+        encontrar_elemento_visivel(driver, By.NAME, "_lyAUTEID_AFIL", timeout=15)
+        return
+    except Exception:
+        pass
     try:
         click_by_text(driver, "Plano Diário", tag="div", timeout=2)
     except Exception:

@@ -35,7 +35,7 @@ from argos.eorder.programaveis import (
     preencher_busca,
     proximo_dia_util,
 )
-from argos.eorder.sessao import login
+from argos.eorder.sessao import login, voltar_ao_menu
 from argos.eorder.ui import debug_screenshot
 from argos.estado import carregar_json, salvar_json
 from argos.log import log
@@ -111,12 +111,14 @@ class MonitorProgramaveis(threading.Thread):
     def _ir_para_co(self, driver, co):
         """Troca de CO. Com o Plano Diário já aberto, entrar de novo pelo
         menu cai em outra tela (testado na descoberta), então a troca parte
-        do Menu Principal recém-carregado; se falhar, reloga e tenta de novo."""
+        do Menu Principal recarregado. Recarregar sem relogar (voltar_ao_menu)
+        leva ~25s, contra ~40s do login completo; se falhar, reloga e tenta
+        de novo."""
         primeira = self._co_atual is None
         self._co_atual = None
         try:
             if not primeira:
-                login(driver)
+                voltar_ao_menu(driver)
             navegar_ate_atividades_programaveis(driver, co.value)
         except Exception as e:
             log(f"Troca para o CO {co.nome} falhou ({str(e).splitlines()[0]}); relogando.", self.PREFIXO)

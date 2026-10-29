@@ -9,6 +9,21 @@ from argos import config
 from argos.eorder.ui import debug_screenshot
 
 
+def voltar_ao_menu(driver):
+    """Recarrega o eOrder mantendo os cookies: com a sessão viva ele abre
+    direto no Menu Principal, limpo como depois do login, mas sem enviar a
+    senha nem esperar o pós-login. Se a sessão caiu, faz o login completo."""
+    driver.get(config.BASE_URL)
+    WebDriverWait(driver, config.WAIT_TIMEOUT).until(
+        EC.any_of(
+            EC.presence_of_element_located((By.NAME, "USER")),
+            EC.presence_of_element_located((By.XPATH, "//*[contains(normalize-space(text()),'Menu Principal')]")),
+        )
+    )
+    if driver.find_elements(By.NAME, "USER"):
+        login(driver)
+
+
 def login(driver):
     """Loga no eOrder. `webdriver.Chrome()` abre uma instância nova (perfil
     limpo, sem cookies), então o primeiro login acontece de verdade aqui.
