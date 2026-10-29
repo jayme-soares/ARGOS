@@ -2,8 +2,9 @@
 
 - um de programáveis por contrato (SOC: um CO a cada 1 min; Negociação:
   percorre os COs "Ceneged - X" em sequência, sem parar);
-- um de campo para todos os contratos (uma exportação da Busca TdC por CO,
-  todas no mesmo ciclo).
+- um de campo por contrato (uma exportação da Busca TdC por CO). A SOC tem
+  o próprio: com a Negociação no mesmo ciclo, a planilha da SOC esperava as
+  11 da Negociação (~15 min) e os alertas de vencimento ficavam parados.
 
 Ficam separados porque a exportação da Busca TdC pode levar vários minutos
 (o eOrder gera o arquivo de forma assíncrona) — num Chrome só, a checagem de
@@ -380,8 +381,9 @@ class _CampoContrato:
 
 
 class MonitorCampo(threading.Thread):
-    """A cada INTERVALO_CAMPO_MINUTOS abre um Chrome, loga, exporta uma
-    planilha da Busca TdC por CO (de todos os contratos) e fecha o Chrome.
+    """Em campo de um contrato. A cada INTERVALO_CAMPO_MINUTOS abre um
+    Chrome, loga, exporta uma planilha da Busca TdC por CO do contrato e
+    fecha o Chrome.
     Abrir/fechar a cada ciclo (em vez de manter a sessão aberta 30 min
     parada) evita lidar com sessão expirada e libera memória entre um ciclo
     e outro.
@@ -389,26 +391,30 @@ class MonitorCampo(threading.Thread):
     Entre exportações, reavalia os alertas de vencimento de cada contrato a
     cada REAVALIACAO_ALERTAS_MINUTOS sobre os últimos dados lidos."""
 
-    NOME = "campo"
-    PREFIXO = "CAMPO"
-
-    def __init__(self, contratos: tuple[Contrato, ...]):
+    def __init__(self, contrato: Contrato):
+        self.contrato = contrato
+        self.NOME = contrato.worker("campo")
+        self.PREFIXO = "CAMPO" if contrato.id == "soc" else f"CAMPO {contrato.nome.upper()}"
+        # Pasta própria: cada monitor limpa a sua no início da exportação.
+        self.pasta_download = config.DOWNLOAD_DIR if contrato.id == "soc" else config.DOWNLOAD_DIR / contrato.id
         super().__init__(name=self.NOME, daemon=True)
-        self.contratos = tuple(c for c in contratos if c.cos_campo)
-        self.dados = {c.id: _CampoContrato(c) for c in self.contratos}
+        self.dados = _CampoContrato(contrato)
         self.proxima_extracao = _agora()  # exporta assim que entrar na janela
 
-    def _status(self, estado, contratos=None):
-        saude.atualizar_status(self.NOME, estado, chave="campo", contratos=contratos or self.contratos)
+    def _status(self, estado):
+        saude.atualizar_status(self.NOME, estado, chave="campo", contratos=(self.contrato,))
 
     def _exportar(self) -> dict[str, Path | Exception]:
-        cos = [co for c in self.contratos for co in c.cos_campo]
         driver = None
         try:
             self._status("iniciando_sessao")
-            driver = abrir_driver(pasta_download=config.DOWNLOAD_DIR)
+            self.pasta_download.mkdir(parents=True, exist_ok=True)
+            driver = abrir_driver(pasta_download=self.pasta_download)
             login(driver)
-            return exportar_cos(driver, cos, progresso=lambda etapa: saude.bater(self.NOME))
+            return exportar_cos(
+                driver, list(self.contrato.cos_campo), progresso=lambda etapa: saude.bater(self.NOME),
+                pasta=self.pasta_download, nome_base=f"argos_campo_{self.contrato.id}", prefixo=self.PREFIXO,
+            )
         finally:
             fechar_driver(driver)
             if config.MODO_SEQUENCIAL:
@@ -498,8 +504,8 @@ class MonitorCampo(threading.Thread):
             return
 
         agora = _agora()
-        lidos = {cid: self._ler_contrato(d, planilhas, agora) for cid, d in self.dados.items()}
-        if not any(lidos.values()):
+        d = self.dados
+        if not self._ler_contrato(d, planilhas, agora):
             self.proxima_extracao = agora + timedelta(minutes=config.RETENTATIVA_CAMPO_MINUTOS)
             erros = {str(e).splitlines()[0] for e in planilhas.values() if isinstance(e, Exception)}
             log(f"Nenhuma planilha lida ({'; '.join(erros) or 'sem detalhe'}). "
@@ -507,43 +513,40 @@ class MonitorCampo(threading.Thread):
             self._status("erro: nenhuma planilha lida")
             return
 
-        # Um CO falhando de vez não pode fazer o ciclo inteiro (12 exportações)
-        # rodar a cada 5 min: a retentativa curta é só quando nada foi lido.
+        # Um CO falhando de vez não pode fazer o ciclo inteiro (11 exportações
+        # na Negociação) rodar a cada 5 min: a retentativa curta é só quando
+        # nada foi lido.
         self.proxima_extracao = agora + timedelta(minutes=config.INTERVALO_CAMPO_MINUTOS)
         log(f"Próxima exportação às {self.proxima_extracao:%H:%M}.", self.PREFIXO)
-        for cid, d in self.dados.items():
-            self._publicar(d)
-            if not lidos[cid]:
-                self._status("erro: nenhuma planilha lida", (d.contrato,))
-                continue
-            self._status(f"erro parcial: {', '.join(d.cos_com_erro)}" if d.cos_com_erro else "ok", (d.contrato,))
-            try:
-                avisos_equipe.avisar_designacoes(d.registros, d.contrato)
-            except Exception as e:
-                log(f"ERRO ao avisar designações às equipes ({d.contrato.nome}): {e}", self.PREFIXO)
+        self._publicar(d)
+        self._status(f"erro parcial: {', '.join(d.cos_com_erro)}" if d.cos_com_erro else "ok")
+        try:
+            avisos_equipe.avisar_designacoes(d.registros, d.contrato)
+        except Exception as e:
+            log(f"ERRO ao avisar designações às equipes ({d.contrato.nome}): {e}", self.PREFIXO)
 
     def avaliar_alertas(self):
         agora = _agora()
-        for d in self.dados.values():
-            if d.atualizado_em is None:
-                continue
-            idade = agora - d.atualizado_em
-            if idade > timedelta(minutes=config.IDADE_MAXIMA_DADOS_CAMPO_MINUTOS):
-                if not d.avisou_dados_velhos:
-                    log(f"[{d.contrato.nome}] Dados de campo com {formatar_duracao(idade.total_seconds() / 60)} — "
-                        "alertas suspensos até a próxima exportação.", self.PREFIXO)
-                    d.avisou_dados_velhos = True
-                continue
-            try:
-                avisos = processar_alertas(
-                    d.registros, agora, contrato=d.contrato,
-                    ao_disparar=functools.partial(avisos_equipe.avisar_vencimentos, contrato=d.contrato),
-                )
-                for aviso in avisos:
-                    log(f"Alerta: {aviso['titulo']}", self.PREFIXO)
-                avisos_equipe.reenviar_pendentes(d.registros, agora, d.contrato)
-            except Exception as e:
-                log(f"ERRO ao avaliar alertas ({d.contrato.nome}): {e}", self.PREFIXO)
+        d = self.dados
+        if d.atualizado_em is None:
+            return
+        idade = agora - d.atualizado_em
+        if idade > timedelta(minutes=config.IDADE_MAXIMA_DADOS_CAMPO_MINUTOS):
+            if not d.avisou_dados_velhos:
+                log(f"[{d.contrato.nome}] Dados de campo com {formatar_duracao(idade.total_seconds() / 60)} — "
+                    "alertas suspensos até a próxima exportação.", self.PREFIXO)
+                d.avisou_dados_velhos = True
+            return
+        try:
+            avisos = processar_alertas(
+                d.registros, agora, contrato=d.contrato,
+                ao_disparar=functools.partial(avisos_equipe.avisar_vencimentos, contrato=d.contrato),
+            )
+            for aviso in avisos:
+                log(f"Alerta: {aviso['titulo']}", self.PREFIXO)
+            avisos_equipe.reenviar_pendentes(d.registros, agora, d.contrato)
+        except Exception as e:
+            log(f"ERRO ao avaliar alertas ({d.contrato.nome}): {e}", self.PREFIXO)
 
     def run(self):
         while True:

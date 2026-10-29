@@ -81,11 +81,11 @@ def _esc(driver):
     ActionChains(driver).send_keys(Keys.ESCAPE).perform()
 
 
-def limpar_downloads():
+def limpar_downloads(pasta: Path):
     """Apaga as planilhas de ciclos anteriores. A última baixada fica até o
     próximo ciclo (útil para conferir o que foi lido)."""
-    config.DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    for arq in config.DOWNLOAD_DIR.iterdir():
+    pasta.mkdir(parents=True, exist_ok=True)
+    for arq in pasta.iterdir():
         try:
             if arq.is_file():
                 arq.unlink()
@@ -326,26 +326,26 @@ def _atualizar_lista_exportacao(driver):
         abrir_lista_exportacao(driver)
 
 
-def _arquivos_prontos(antes: set[str]) -> list[Path]:
+def _arquivos_prontos(pasta: Path, antes: set[str]) -> list[Path]:
     return [
-        p for p in config.DOWNLOAD_DIR.iterdir()
+        p for p in pasta.iterdir()
         if p.is_file() and p.name not in antes and not p.name.lower().endswith(EXTENSOES_TEMPORARIAS)
     ]
 
 
-def _download_em_andamento() -> bool:
-    return any(p.name.lower().endswith(EXTENSOES_TEMPORARIAS) for p in config.DOWNLOAD_DIR.iterdir())
+def _download_em_andamento(pasta: Path) -> bool:
+    return any(p.name.lower().endswith(EXTENSOES_TEMPORARIAS) for p in pasta.iterdir())
 
 
-def esperar_download(antes: set[str], timeout: float, progresso=_nada) -> Path | None:
+def esperar_download(pasta: Path, antes: set[str], timeout: float, progresso=_nada) -> Path | None:
     """Espera surgir um arquivo novo e completo na pasta de download.
     Enquanto houver .crdownload, o prazo é estendido (o arquivo está
     chegando). Retorna None se nada começou a baixar dentro do prazo."""
     fim = time.time() + timeout
     limite_absoluto = time.time() + 10 * 60
-    while time.time() < fim or (_download_em_andamento() and time.time() < limite_absoluto):
+    while time.time() < fim or (_download_em_andamento(pasta) and time.time() < limite_absoluto):
         progresso("baixando_planilha")
-        prontos = _arquivos_prontos(antes)
+        prontos = _arquivos_prontos(pasta, antes)
         if prontos:
             arq = max(prontos, key=lambda p: p.stat().st_mtime)
             # Tamanho estável = Chrome terminou de gravar.
@@ -358,9 +358,11 @@ def esperar_download(antes: set[str], timeout: float, progresso=_nada) -> Path |
     return None
 
 
-def baixar_exportacao(driver, nome_exportacao: str, progresso=_nada) -> Path:
+def baixar_exportacao(driver, nome_exportacao: str, progresso=_nada, pasta: Path | None = None,
+                      prefixo: str = PREFIXO_LOG) -> Path:
     """Faz polling da Lista de exportação até a linha com `nome_exportacao`
     aparecer, dá duplo clique para baixar e confirma o arquivo na pasta."""
+    pasta = pasta or config.DOWNLOAD_DIR
     fim = time.time() + config.EXPORTACAO_TIMEOUT_SEGUNDOS
     xpath_linha = f"//td[contains(., '{nome_exportacao}')]/.."
     while time.time() < fim:
@@ -375,17 +377,17 @@ def baixar_exportacao(driver, nome_exportacao: str, progresso=_nada) -> Path:
                 pass
 
         if linha is not None:
-            antes = {p.name for p in config.DOWNLOAD_DIR.iterdir()}
+            antes = {p.name for p in pasta.iterdir()}
             try:
                 ActionChains(driver).move_to_element(linha).double_click().perform()
             except Exception as e:
-                log(f"Duplo clique na exportação falhou ({e}); tentando de novo.", PREFIXO_LOG)
-            arquivo = esperar_download(antes, timeout=60, progresso=progresso)
+                log(f"Duplo clique na exportação falhou ({e}); tentando de novo.", prefixo)
+            arquivo = esperar_download(pasta, antes, timeout=60, progresso=progresso)
             if arquivo is not None:
                 return arquivo
-            log("Exportação listada, mas o download não começou (talvez ainda processando).", PREFIXO_LOG)
+            log("Exportação listada, mas o download não começou (talvez ainda processando).", prefixo)
         else:
-            log(f"Exportação ainda não disponível; nova verificação em {config.EXPORTACAO_POLLING_SEGUNDOS}s.", PREFIXO_LOG)
+            log(f"Exportação ainda não disponível; nova verificação em {config.EXPORTACAO_POLLING_SEGUNDOS}s.", prefixo)
 
         time.sleep(config.EXPORTACAO_POLLING_SEGUNDOS)
         _atualizar_lista_exportacao(driver)
@@ -412,38 +414,44 @@ def _solicitar_exportacao_do_co(driver, co_nome: str | None, nome_exportacao: st
     solicitar_exportacao(driver, nome_exportacao)
 
 
-def exportar_cos(driver, cos: list[str], progresso=_nada) -> dict[str, Path | Exception]:
+def exportar_cos(driver, cos: list[str], progresso=_nada, pasta: Path | None = None,
+                 nome_base: str = "argos_campo", prefixo: str = PREFIXO_LOG) -> dict[str, Path | Exception]:
     """Pede uma exportação por CO e depois baixa todas. Com o driver já
     logado. Retorna {co: planilha baixada ou a exceção daquele CO}: um CO
     que falha não derruba os outros. `progresso(etapa)` é chamado a cada
-    etapa (alimenta o watchdog e o status do painel)."""
+    etapa (alimenta o watchdog e o status do painel).
+
+    `pasta` (a mesma passada ao abrir_driver) e `nome_base` precisam ser
+    próprios de cada monitor: os de campo rodam ao mesmo tempo, e a pasta é
+    limpa no início e o nome identifica a linha na Lista de exportação."""
     from argos.eorder.sessao import login
 
     agora = datetime.now(config.TIMEZONE)
     inicio = agora - timedelta(days=config.CAMPO_DIAS_ATRAS)
-    limpar_downloads()
+    pasta = pasta or config.DOWNLOAD_DIR
+    limpar_downloads(pasta)
 
     resultado: dict[str, Path | Exception] = {}
     nomes: dict[str, str] = {}
     for i, co in enumerate(cos):
-        nome = f"argos_campo_{agora:%Y%m%d_%H%M%S}_{i:02d}"
+        nome = f"{nome_base}_{agora:%Y%m%d_%H%M%S}_{i:02d}"
         if i > 0:
             # Cada CO parte do Menu Principal recarregado: reabrir pelo menu a
             # Busca TdC já aberta (ou quebrada) não volta ao formulário limpo.
             try:
                 login(driver)
             except Exception as e_login:
-                log(f"Relogin para o próximo CO falhou: {e_login}", PREFIXO_LOG)
+                log(f"Relogin para o próximo CO falhou: {e_login}", prefixo)
                 for resto in cos[i:]:
                     resultado[resto] = e_login
                 break
         try:
             _solicitar_exportacao_do_co(driver, co, nome, inicio, agora, progresso)
             nomes[co] = nome
-            log(f"Exportação '{nome}' ({co}) solicitada.", PREFIXO_LOG)
+            log(f"Exportação '{nome}' ({co}) solicitada.", prefixo)
         except Exception as e:
             resultado[co] = e
-            log(f"ERRO ao pedir a exportação de {co}: {str(e).splitlines()[0]}", PREFIXO_LOG)
+            log(f"ERRO ao pedir a exportação de {co}: {str(e).splitlines()[0]}", prefixo)
 
     if nomes:
         if len(cos) > 1:
@@ -451,12 +459,12 @@ def exportar_cos(driver, cos: list[str], progresso=_nada) -> dict[str, Path | Ex
         abrir_lista_exportacao(driver)
     for co, nome in nomes.items():
         try:
-            arquivo = baixar_exportacao(driver, nome, progresso=progresso)
-            log(f"Planilha de {co} baixada: {arquivo.name} ({arquivo.stat().st_size} bytes)", PREFIXO_LOG)
+            arquivo = baixar_exportacao(driver, nome, progresso=progresso, pasta=pasta, prefixo=prefixo)
+            log(f"Planilha de {co} baixada: {arquivo.name} ({arquivo.stat().st_size} bytes)", prefixo)
             resultado[co] = arquivo
         except Exception as e:
             resultado[co] = e
-            log(f"ERRO ao baixar a exportação de {co}: {str(e).splitlines()[0]}", PREFIXO_LOG)
+            log(f"ERRO ao baixar a exportação de {co}: {str(e).splitlines()[0]}", prefixo)
     return resultado
 
 

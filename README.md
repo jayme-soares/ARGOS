@@ -158,7 +158,7 @@ Para configurar:
 | Estado em `/data` | raiz | `negociacao/` |
 | ntfy | `NTFY_TOPIC` | `NTFY_TOPIC_NEGOCIACAO` |
 
-O monitor de campo é um só para os dois contratos. A cada ciclo ele pede uma exportação por CO (1 da SOC e 11 da Negociação) e depois baixa todas. Se um CO falhar, ficam os dados anteriores dele, o painel avisa quais COs ficaram sem dados novos, e os outros seguem normalmente. As programáveis da Negociação funcionam do mesmo jeito.
+Cada contrato tem o próprio monitor de campo, com Chrome e pasta de download próprios (`/data/downloads` e `/data/downloads/negociacao`). Assim a SOC (1 CO, ~3 min) não espera as 11 exportações da Negociação (~15 min). A cada ciclo, o monitor pede uma exportação por CO do contrato e depois baixa todas. Se um CO falhar, ficam os dados anteriores dele, o painel avisa quais COs ficaram sem dados novos, e os outros seguem normalmente. As programáveis da Negociação funcionam do mesmo jeito.
 
 Os pushes da gestão vão só para quem tem acesso ao contrato. Na Negociação, o título começa com "ARGOS Negociação ·". Tocar no push abre o painel já no contrato do aviso.
 
@@ -196,7 +196,7 @@ docker compose exec -e SUPABASE_SERVICE_ROLE_KEY='<service_role>' argos \
 
 Também dá para criar as contas num computador com `--planilha "<caminho do xlsx>"`, com `SUPABASE_URL` no `.env`. Mesmo assim, o bot da VPS continua precisando da cópia do passo 1.
 
-Com a Negociação ligada, a VPS roda 3 Chromes ao mesmo tempo: programáveis da SOC, programáveis da Negociação e a exportação de campo. Acompanhe a memória. Se o eOrder derrubar sessões simultâneas do mesmo usuário, use `ARGOS_MODO_SEQUENCIAL=1`.
+Com a Negociação ligada, a VPS roda até 4 Chromes ao mesmo tempo: programáveis da SOC, programáveis da Negociação e as exportações de campo de cada contrato. Os de campo só ficam abertos durante a exportação. Acompanhe a memória. Se o eOrder derrubar sessões simultâneas do mesmo usuário, use `ARGOS_MODO_SEQUENCIAL=1`.
 
 ### Migração 004 (contratos)
 

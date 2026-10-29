@@ -17,7 +17,10 @@ def main():
     saude.iniciar_servidor_saude()
 
     contratos = ativos()
-    monitores = [MonitorProgramaveis(c) for c in contratos if c.programaveis] + [MonitorCampo(contratos)]
+    # Um monitor de campo por contrato: a SOC (1 CO, ~3 min) não espera as
+    # exportações da Negociação (11 COs).
+    monitores = ([MonitorProgramaveis(c) for c in contratos if c.programaveis]
+                 + [MonitorCampo(c) for c in contratos if c.cos_campo])
     for m in monitores:
         saude.bater(m.NOME)
     saude.iniciar_watchdog()

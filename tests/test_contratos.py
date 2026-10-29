@@ -91,7 +91,7 @@ class TestPlanilhaNegociacao(unittest.TestCase):
         self.assertNotIn("co", regs[0])
 
     def test_co_que_falha_mantem_dados_anteriores(self):
-        monitor = MonitorCampo((NEGOCIACAO,)) if NEGOCIACAO.cos_campo else None
+        monitor = MonitorCampo(NEGOCIACAO) if NEGOCIACAO.cos_campo else None
         if monitor is None:
             self.skipTest("sem COs de campo configurados")
         angra, araruama = NEGOCIACAO.cos_campo[:2]
