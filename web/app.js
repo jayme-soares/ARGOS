@@ -541,7 +541,7 @@ function renderKpis(snap, campo, programaveis, finalizadas, totalProg, agora) {
     kpi({
       rotulo: "Programáveis",
       valor: totalProg,
-      detalhe: [novasProg ? `${novasProg} nova(s) em 1h` : "aguardando designação", progCaminhao ? `🚚 ${progCaminhao} de caminhão` : ""].filter(Boolean).join(" · "),
+      detalhe: [novasProg ? `${novasProg} nova(s) em 1h` : "aguardando designação", progCaminhao ? `${progCaminhao} precisa(m) de caminhão` : ""].filter(Boolean).join(" · "),
       cor: totalProg ? "atencao" : null,
       acao: "programaveis:",
     }),
@@ -662,8 +662,8 @@ const COLUNA_TRAMITE = { id: "tramite", rotulo: "Trâmite", valor: (r) => r._tra
 const COLUNA_CAMINHAO = { id: "caminhao", rotulo: "Caminhão", valor: (r) => caminhaoDa(r)?.marcado_em, html: (r, agora) => {
   const c = caminhaoDa(r);
   const ids = `data-ordem="${esc(r.ordem)}" data-tdc="${esc(r.tdc)}"`;
-  if (!c) return `<button class="btn-mini" data-caminhao="marcar" ${ids} title="Marcar como precisa de caminhão">🚚 marcar</button>`;
-  return `<div class="celula-caminhao"><span class="tag caminhao">🚚 Precisa de caminhão</span>`
+  if (!c) return `<button class="btn-mini" data-caminhao="marcar" ${ids} title="Marcar como precisa de caminhão">marcar</button>`;
+  return `<div class="celula-caminhao"><span class="tag caminhao">Precisa de caminhão</span>`
     + `<span class="secundario">${esc(textoCaminhao(c, agora))}</span>`
     + `<button class="btn-link" data-caminhao="desmarcar" data-id="${c.id}" ${ids}>desmarcar</button></div>`;
 } };

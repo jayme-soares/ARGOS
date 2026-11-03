@@ -437,11 +437,11 @@ function cartaoAberta(r) {
 function blocoCaminhao(r) {
   const c = caminhaoDa(r);
   const ids = `data-ordem="${esc(r.ordem)}" data-tdc="${esc(r.tdc)}"`;
-  if (!c) return `<button class="btn-mini eq-btn-caminhao" data-caminhao="marcar" ${ids}>🚚 Precisa de caminhão</button>`;
+  if (!c) return `<button class="btn-mini eq-btn-caminhao" data-caminhao="marcar" ${ids}>Precisa de caminhão</button>`;
   const minha = c.equipe && c.equipe === estado.acesso?.equipe;
   return `
       <div class="eq-caminhao">
-        <span class="tag caminhao">🚚 Precisa de caminhão</span>
+        <span class="tag caminhao">Precisa de caminhão</span>
         <span class="secundario">${esc(textoCaminhao(c, new Date()))}</span>
         ${minha ? `<button class="btn-link" data-caminhao="desmarcar" data-id="${c.id}" ${ids}>desmarcar</button>` : ""}
       </div>`;
