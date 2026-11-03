@@ -10,6 +10,9 @@
 // Um painel por contrato (SOC e Negociação). Cada usuário vê os contratos
 // que o administrador geral liberou (argos_acessos.contratos); quem tem mais
 // de um alterna pelo seletor no topo.
+//
+// Religas marcadas como "precisa de caminhão" (pela equipe no /equipe ou pela
+// coordenação aqui) aparecem em Em campo e em Programáveis (argos_caminhao).
 
 const CHAVE_PREFS = "argos.prefs";
 
@@ -34,6 +37,7 @@ Object.assign(estado, {
   // painel inteiro e ficam salvos no navegador: cada pessoa acompanha os seus.
   cosPorContrato: prefsSalvas.cos || {},
   urg: "",
+  soCaminhao: false, // Em campo/Programáveis: só as que precisam de caminhão
   periodo: "hoje",   // aba Finalizadas: "hoje" ou "" (toda a janela da extração)
   ordem: {
     campo: { col: "restante", dir: 1 },
@@ -89,7 +93,7 @@ function escolherContrato() {
 function trocarContrato(contrato) {
   if (contrato === estado.contrato) return;
   estado.contrato = contrato;
-  Object.assign(estado, { snapshot: null, equipe: "", bairro: "", tramite: "", urg: "", equipesResumo: [], avisosEquipe: [] });
+  Object.assign(estado, { snapshot: null, equipe: "", bairro: "", tramite: "", urg: "", equipesResumo: [], avisosEquipe: [], caminhoes: [] });
   // O ?contrato= do link do push não pode prender o painel no contrato antigo.
   if (location.search) history.replaceState(null, "", location.pathname);
   salvarPrefs();
@@ -98,6 +102,7 @@ function trocarContrato(contrato) {
 }
 
 const ABAS_COM_EQUIPE = new Set(["campo", "finalizadas", "avisos"]);
+const ABAS_COM_CAMINHAO = new Set(["campo", "programaveis"]);
 // Na Negociação a equipe é o nome (coluna "Equipe"); `equipe` é a chave.
 const SEM_TRAMITE = "-";
 const nomeEquipe = (r) => r.equipe_nome || r.equipe;
@@ -125,7 +130,9 @@ async function buscarSnapshot() {
     estado.snapshot = corpo;
     estado.ultimoErro = null;
     if (!estado.pushSincronizado) { estado.pushSincronizado = true; sincronizarPush(); }
-    await Promise.all([carregarDadosEquipes(), ehAdmin() ? carregarAcessos() : null, ehAdmin() ? carregarTvs() : null]);
+    await Promise.all([
+      carregarDadosEquipes(), carregarCaminhoes(contrato), ehAdmin() ? carregarAcessos() : null, ehAdmin() ? carregarTvs() : null,
+    ]);
     return true;
   } catch (e) {
     estado.ultimoErro = e.message || String(e);
@@ -186,6 +193,27 @@ async function acaoContaEquipe(acao, alvo, equipe) {
     prompt(`Senha temporária da equipe ${equipe}. Copie e repasse à equipe; ela vai criar uma senha nova no próximo login:`, corpo.senha);
   }
   await Promise.all([carregarAcessos(), carregarDadosEquipes()]);
+  renderizar();
+}
+
+// Coordenação marca (ex.: a equipe avisou pelo WhatsApp) ou tira a marcação.
+async function acaoCaminhao(btn) {
+  const tdc = btn.dataset.tdc;
+  let erro;
+  if (btn.dataset.caminhao === "marcar") {
+    const obs = prompt(`Marcar a religa TdC ${tdc} como "precisa de caminhão"? Observação (opcional):`, "");
+    if (obs === null) return;
+    btn.disabled = true;
+    ({ error: erro } = await estado.sb.rpc("argos_caminhao_marcar", {
+      p_ordem: btn.dataset.ordem, p_tdc: tdc, p_observacao: obs, p_contrato: estado.contrato,
+    }));
+  } else {
+    if (!confirm(`Tirar a marcação de caminhão da religa TdC ${tdc}?`)) return;
+    btn.disabled = true;
+    ({ error: erro } = await estado.sb.rpc("argos_caminhao_desmarcar", { p_id: Number(btn.dataset.id) }));
+  }
+  if (erro) alert(erro.message);
+  await carregarCaminhoes(estado.contrato);
   renderizar();
 }
 
@@ -491,6 +519,7 @@ function renderKpis(snap, campo, programaveis, finalizadas, totalProg, agora) {
     const d = data(r.primeiro_visto_em);
     return d && agora - d <= 60 * 60000;
   }).length;
+  const progCaminhao = programaveis.filter(caminhaoDa).length;
   const finHoje = finalizadas.filter((r) => finalizadaHoje(r, agora));
   const finNoPrazo = finHoje.filter((r) => r.no_prazo === true).length;
   const finForaPrazo = finHoje.filter((r) => r.no_prazo === false).length;
@@ -509,7 +538,13 @@ function renderKpis(snap, campo, programaveis, finalizadas, totalProg, agora) {
       acao: "finalizadas:",
     }),
     kpiAvisos(agora),
-    kpi({ rotulo: "Programáveis", valor: totalProg, detalhe: novasProg ? `${novasProg} nova(s) em 1h` : "aguardando designação", cor: totalProg ? "atencao" : null, acao: "programaveis:" }),
+    kpi({
+      rotulo: "Programáveis",
+      valor: totalProg,
+      detalhe: [novasProg ? `${novasProg} nova(s) em 1h` : "aguardando designação", progCaminhao ? `🚚 ${progCaminhao} de caminhão` : ""].filter(Boolean).join(" · "),
+      cor: totalProg ? "atencao" : null,
+      acao: "programaveis:",
+    }),
   ].join("");
 }
 
@@ -590,6 +625,8 @@ function renderFiltros(campo, finalizadas, programaveis) {
   $("#filtro-bairro").hidden = !comEquipe || ehAvisos;
   $("#filtro-tramite").hidden = !comEquipe || ehAvisos;
   $("#filtro-urgencia").hidden = ehFinalizadas || ehAvisos || ehAcessos;
+  $("#filtro-caminhao").hidden = !ABAS_COM_CAMINHAO.has(estado.aba);
+  $("#filtro-caminhao").setAttribute("aria-pressed", String(estado.soCaminhao));
   $("#btn-exportar").hidden = ehAcessos;
   $("#filtro-tipo-acesso").hidden = !ehAcessos;
   $("#filtro-painel-acesso").hidden = !ehAcessos;
@@ -621,10 +658,20 @@ const COLUNA_CO = { id: "co", rotulo: "CO", multiCo: true, valor: (r) => nomeCo(
 const COLUNA_TIPO_CAMPO = { id: "tipo", rotulo: "Tipo", valor: (r) => r.tipo, html: (r) => `${esc(r.tipo)}${r.tipo_servico ? `<div class="secundario">${esc(r.tipo_servico)}</div>` : ""}`, cheio: true };
 // Medidor, Poste DAT, Ramal..., tirado do fim do ciclo (tramiteDoCiclo).
 const COLUNA_TRAMITE = { id: "tramite", rotulo: "Trâmite", valor: (r) => r._tramite, html: (r) => r._tramite ? esc(r._tramite) : `<span class="fraco">—</span>` };
+// Precisa de caminhão (argos_caminhao): quem marcou, quando e o motivo.
+const COLUNA_CAMINHAO = { id: "caminhao", rotulo: "Caminhão", valor: (r) => caminhaoDa(r)?.marcado_em, html: (r, agora) => {
+  const c = caminhaoDa(r);
+  const ids = `data-ordem="${esc(r.ordem)}" data-tdc="${esc(r.tdc)}"`;
+  if (!c) return `<button class="btn-mini" data-caminhao="marcar" ${ids} title="Marcar como precisa de caminhão">🚚 marcar</button>`;
+  return `<div class="celula-caminhao"><span class="tag caminhao">🚚 Precisa de caminhão</span>`
+    + `<span class="secundario">${esc(textoCaminhao(c, agora))}</span>`
+    + `<button class="btn-link" data-caminhao="desmarcar" data-id="${c.id}" ${ids}>desmarcar</button></div>`;
+} };
 const COLUNAS = {
   campo: [
     { id: "restante", rotulo: "Tempo restante", valor: (r) => r._min, html: celRestante },
     { id: "vencimento", rotulo: "Vencimento", valor: (r) => r._min, html: (r) => `<span class="num">${esc(diaHora(r._venc))}</span>` },
+    COLUNA_CAMINHAO,
     COLUNA_CO,
     { id: "ordem", rotulo: "Ordem", valor: (r) => r.ordem, html: (r) => `<span class="num">${esc(r.ordem)}</span>` },
     { id: "tdc", rotulo: "TdC", valor: (r) => r.tdc, html: (r) => `<span class="num">${esc(r.tdc)}</span>` },
@@ -637,6 +684,7 @@ const COLUNAS = {
   programaveis: [
     { id: "restante", rotulo: "Tempo restante", valor: (r) => r._min, html: celRestante },
     { id: "vencimento", rotulo: "Vencimento", valor: (r) => r._min, html: (r) => `<span class="num">${esc(diaHora(r._venc))}</span>` },
+    COLUNA_CAMINHAO,
     COLUNA_CO,
     { id: "tdc", rotulo: "TdC", valor: (r) => r.tdc, html: (r, agora) => {
       const visto = data(r.primeiro_visto_em);
@@ -913,6 +961,7 @@ function filtrar(linhas, aba = estado.aba) {
     } else if (aba === "finalizadas") {
       if (estado.periodo === "hoje" && !finalizadaHoje(r, agora)) return false;
     } else if (estado.urg && !FILTRO_URGENCIA[estado.urg](r._min)) return false;
+    if (ABAS_COM_CAMINHAO.has(aba) && estado.soCaminhao && !caminhaoDa(r)) return false;
     if (termo) {
       const alvo = [r.ordem, r.tdc, r.cliente, r.equipe, r.equipe_nome, r.co, r.bairro, r.tipo, r.tipo_servico, r.endereco, r.nome_cliente, r.resultado, r.titulo].join(" ").toLowerCase();
       if (!alvo.includes(termo)) return false;
@@ -1044,6 +1093,11 @@ function dataBrasilia(d) {
 
 // [rótulo, valor, tipo] — "data" formata como dd/mm/aaaa hh:mm e
 // "urgencia" pinta a célula com a cor da situação.
+const COLUNA_RELATORIO_CAMINHAO = ["Precisa de caminhão", (r) => {
+  const c = caminhaoDa(r);
+  if (!c) return "";
+  return [`Sim · ${quemMarcouCaminhao(c)} em ${diaHora(data(c.marcado_em))}`, c.observacao].filter(Boolean).join(" · ");
+}];
 const COLUNAS_RELATORIO = {
   campo: [
     ["CO", (r) => nomeCo(r.co), "co"],
@@ -1060,6 +1114,7 @@ const COLUNAS_RELATORIO = {
     ["Vencimento", (r) => dataBrasilia(r._venc), "data"],
     ["Tempo restante", (r) => textoRestante(r._min), "urgencia"],
     ["Situação", (r) => NOME_URGENCIA[r._urg], "urgencia"],
+    COLUNA_RELATORIO_CAMINHAO,
   ],
   programaveis: [
     ["CO", (r) => nomeCo(r.co), "co"],
@@ -1073,6 +1128,7 @@ const COLUNAS_RELATORIO = {
     ["Tempo restante", (r) => textoRestante(r._min), "urgencia"],
     ["Situação", (r) => NOME_URGENCIA[r._urg], "urgencia"],
     ["Entrou no painel", (r) => dataBrasilia(data(r.primeiro_visto_em)), "data"],
+    COLUNA_RELATORIO_CAMINHAO,
   ],
   finalizadas: [
     ["CO", (r) => nomeCo(r.co), "co"],
@@ -1121,6 +1177,7 @@ function descreverFiltros(aba) {
   const f = [];
   if (estado.texto.trim()) f.push(`busca "${estado.texto.trim()}"`);
   if (aba === "finalizadas") f.push(estado.periodo === "hoje" ? "finalizadas hoje" : "período da extração");
+  if (ABAS_COM_CAMINHAO.has(aba) && estado.soCaminhao) f.push("só as que precisam de caminhão");
   else if (aba === "avisos") { if (estado.statusAviso) f.push(`status ${estado.statusAviso}`); }
   else if (estado.urg) f.push($(`#filtro-urgencia [data-urg="${estado.urg}"]`)?.textContent || estado.urg);
   const cos = cosSelecionados();
@@ -1316,6 +1373,11 @@ $("#tabela-corpo").addEventListener("change", (ev) => {
 });
 
 $("#tabela-corpo").addEventListener("click", async (ev) => {
+  const caminhao = ev.target.closest("[data-caminhao]");
+  if (caminhao) {
+    if (!caminhao.disabled) await acaoCaminhao(caminhao);
+    return;
+  }
   const botaoTv = ev.target.closest("[data-tv-acao]");
   if (botaoTv) {
     const tv = (estado.tvs || []).find((t) => t.id === botaoTv.dataset.tv);
@@ -1377,6 +1439,11 @@ $("#filtro-urgencia").addEventListener("click", (ev) => {
   const c = ev.target.closest(".chip");
   if (!c) return;
   estado.urg = estado.urg === c.dataset.urg ? "" : c.dataset.urg;
+  renderizar();
+});
+
+$("#filtro-caminhao").addEventListener("click", () => {
+  estado.soCaminhao = !estado.soCaminhao;
   renderizar();
 });
 

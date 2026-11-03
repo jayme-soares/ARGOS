@@ -31,6 +31,7 @@ const estado = {
   ultimoErro: null,
   push: null,        // estado do sino — ver atualizarEstadoPush()
   pushSincronizado: false,
+  caminhoes: [],     // marcações ativas de "precisa de caminhão" (argos_caminhao)
 };
 
 // ------------------------------------------------------------------
@@ -245,6 +246,35 @@ async function criarSupabase() {
 async function tokenAtual() {
   const { data } = await estado.sb.auth.getSession();
   return data.session?.access_token || null;
+}
+
+// ------------------------------------------------------------------
+// PRECISA DE CAMINHÃO (migração 006)
+// ------------------------------------------------------------------
+// A equipe marca a ordem que precisa de caminhão; a marcação vale para a
+// ordem enquanto ela estiver em campo ou voltar para as programáveis (às
+// vezes com outro TdC), por isso casa pela ordem ou pelo TdC.
+// Sem a migração aplicada, a leitura falha e o painel segue sem marcações.
+async function carregarCaminhoes(contrato) {
+  let q = estado.sb.from("argos_caminhao")
+    .select("id, contrato, ordem, tdc, equipe, observacao, marcado_em, marcado_por_nome")
+    .is("removido_em", null);
+  if (contrato) q = q.eq("contrato", contrato);
+  const { data, error } = await q.order("marcado_em", { ascending: false }).limit(3000);
+  if (contrato && contrato !== estado.contrato) return;  // painel da gestão trocou de contrato no meio
+  if (!error) estado.caminhoes = data || [];
+}
+
+function caminhaoDa(r) {
+  const ordem = String(r.ordem || "");
+  const tdc = String(r.tdc || "");
+  return estado.caminhoes.find((c) => (ordem && c.ordem === ordem) || (tdc && c.tdc === tdc)) || null;
+}
+
+const quemMarcouCaminhao = (c) => (c.equipe ? `equipe ${c.marcado_por_nome || c.equipe}` : (c.marcado_por_nome || "coordenação"));
+// Uma linha com quem marcou, quando e a observação.
+function textoCaminhao(c, agora) {
+  return `${quemMarcouCaminhao(c)} · ${haQuanto(data(c.marcado_em), agora)}${c.observacao ? ` · ${c.observacao}` : ""}`;
 }
 
 // ------------------------------------------------------------------

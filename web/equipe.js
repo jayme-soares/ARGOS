@@ -11,6 +11,9 @@
 // Avisos (religa designada, perto de vencer, vencida) chegam por push e
 // ficam pendentes em argos_avisos_equipe até a equipe confirmar: enquanto
 // houver pendentes, um modal bloqueia o painel.
+//
+// "Precisa de caminhão": a equipe marca a religa que não dá para fazer de
+// carro. A marcação fica em argos_caminhao e aparece para a coordenação.
 
 const CHAVE_PREFS = "argos.equipe.prefs";
 
@@ -93,6 +96,7 @@ async function sair(mensagem) {
   estado.acesso = null;
   estado.snapshot = null;
   estado.avisos = [];
+  estado.caminhoes = [];
   try { await estado.sb.auth.signOut(); } catch { /* sessão já inválida */ }
   mostrarLogin(mensagem);
 }
@@ -239,7 +243,7 @@ async function buscarSnapshot() {
     estado.ultimoErro = e.message || String(e);
     return false;
   } finally {
-    await carregarAvisos();
+    await Promise.all([carregarAvisos(), carregarCaminhoes()]);
     btn.classList.remove("girando");
     renderizar();
   }
@@ -270,6 +274,31 @@ async function confirmarAvisos() {
   } finally {
     btn.disabled = false;
   }
+}
+
+// O RLS só devolve as marcações do contrato da equipe.
+async function marcarCaminhao(btn) {
+  const obs = prompt(
+    `Marcar a religa TdC ${btn.dataset.tdc} como "precisa de caminhão"?\n\nA coordenação vê a marcação, inclusive se a ordem voltar para as programáveis. Se quiser, escreva o motivo (opcional):`,
+    "",
+  );
+  if (obs === null) return;
+  btn.disabled = true;
+  const { error } = await estado.sb.rpc("argos_caminhao_marcar", {
+    p_ordem: btn.dataset.ordem, p_tdc: btn.dataset.tdc, p_observacao: obs,
+  });
+  if (error) { btn.disabled = false; alert(`Não foi possível marcar: ${error.message}`); return; }
+  await carregarCaminhoes();
+  renderizar();
+}
+
+async function desmarcarCaminhao(btn) {
+  if (!confirm(`Tirar a marcação de caminhão da religa TdC ${btn.dataset.tdc}?`)) return;
+  btn.disabled = true;
+  const { error } = await estado.sb.rpc("argos_caminhao_desmarcar", { p_id: Number(btn.dataset.id) });
+  if (error) { btn.disabled = false; alert(`Não foi possível desmarcar: ${error.message}`); return; }
+  await carregarCaminhoes();
+  renderizar();
 }
 
 // ------------------------------------------------------------------
@@ -399,8 +428,23 @@ function cartaoAberta(r) {
       ${r.endereco ? `<div class="eq-endereco">${esc(r.endereco)}</div>` : ""}
       <div class="secundario">${esc([r.bairro, r.tipo].filter(Boolean).join(" · "))}</div>
       ${r.cliente || r.nome_cliente ? `<div class="secundario">Cliente <span class="num">${esc(r.cliente)}</span>${r.nome_cliente ? ` · ${esc(r.nome_cliente)}` : ""}</div>` : ""}
+      ${blocoCaminhao(r)}
       ${linkMapa(r)}
     </article>`;
+}
+
+// Marcada: mostra quem marcou e, se foi esta equipe, o botão de desmarcar.
+function blocoCaminhao(r) {
+  const c = caminhaoDa(r);
+  const ids = `data-ordem="${esc(r.ordem)}" data-tdc="${esc(r.tdc)}"`;
+  if (!c) return `<button class="btn-mini eq-btn-caminhao" data-caminhao="marcar" ${ids}>🚚 Precisa de caminhão</button>`;
+  const minha = c.equipe && c.equipe === estado.acesso?.equipe;
+  return `
+      <div class="eq-caminhao">
+        <span class="tag caminhao">🚚 Precisa de caminhão</span>
+        <span class="secundario">${esc(textoCaminhao(c, new Date()))}</span>
+        ${minha ? `<button class="btn-link" data-caminhao="desmarcar" data-id="${c.id}" ${ids}>desmarcar</button>` : ""}
+      </div>`;
 }
 
 function cartaoFinalizada(r) {
@@ -441,6 +485,12 @@ $("#filtro-periodo").addEventListener("click", (ev) => {
   if (!c) return;
   estado.periodo = c.dataset.periodo;
   renderizar();
+});
+$("#lista").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-caminhao]");
+  if (!btn || btn.disabled) return;
+  if (btn.dataset.caminhao === "marcar") marcarCaminhao(btn);
+  else desmarcarCaminhao(btn);
 });
 $("#btn-confirmar-avisos").addEventListener("click", confirmarAvisos);
 $("#btn-faixa-push").addEventListener("click", () => $("#btn-push").click());
