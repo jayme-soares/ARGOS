@@ -33,21 +33,25 @@ function decodificar(valor) {
   return JSON.parse(valor);
 }
 
+// Valor de variável sem aspas em volta (é fácil colar no Vercel a linha do
+// .env com as aspas, e aí URL e token ficam inválidos).
+const env = (nome) => (process.env[nome] || "").trim().replace(/^(["'])(.*)\1$/, "$2");
+
 const UPSTASH_PAUSA_MS = 5 * 60_000;
 let upstashForaAte = 0;
 
 async function getUpstash(chave) {
-  const r = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(chave)}`, {
-    headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
+  const r = await fetch(`${env("UPSTASH_REDIS_REST_URL")}/get/${encodeURIComponent(chave)}`, {
+    headers: { Authorization: `Bearer ${env("UPSTASH_REDIS_REST_TOKEN")}` },
   });
   if (!r.ok) throw new Error(`Upstash respondeu ${r.status}.`);
   return (await r.json()).result;
 }
 
 async function getSupabase(chave) {
-  const k = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const k = env("SUPABASE_SERVICE_ROLE_KEY");
   const r = await fetch(
-    `${process.env.SUPABASE_URL}/rest/v1/argos_snapshot?select=valor&chave=eq.${encodeURIComponent(chave)}`,
+    `${env("SUPABASE_URL")}/rest/v1/argos_snapshot?select=valor&chave=eq.${encodeURIComponent(chave)}`,
     { headers: { apikey: k, Authorization: `Bearer ${k}` } },
   );
   if (!r.ok) throw new Error(`Supabase respondeu ${r.status}.`);
@@ -56,8 +60,8 @@ async function getSupabase(chave) {
 }
 
 async function get(chave) {
-  const temUpstash = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN;
-  const temReserva = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const temUpstash = env("UPSTASH_REDIS_REST_URL") && env("UPSTASH_REDIS_REST_TOKEN");
+  const temReserva = env("SUPABASE_URL") && env("SUPABASE_SERVICE_ROLE_KEY");
   let erroUpstash = null;
   if (temUpstash && (!temReserva || Date.now() >= upstashForaAte)) {
     try {
