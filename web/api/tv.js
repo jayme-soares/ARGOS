@@ -10,10 +10,7 @@
 // O token fica no navegador da TV; o banco guarda só o hash. Só vai o que a
 // tela mostra: sem nome, endereço nem código do cliente.
 import { createHash, randomBytes } from "node:crypto";
-
-const KEY = process.env.ARGOS_SNAPSHOT_KEY || "argos:snapshot";
-// Iguais a Contrato.snapshot_key em argos/contratos.py.
-const CHAVES = { soc: KEY, negociacao: `${KEY}:negociacao` };
+import { CHAVES, lerSnapshot } from "./_snapshot.js";
 
 const hash = (token) => createHash("sha256").update(token).digest("hex");
 
@@ -65,15 +62,6 @@ function snapshotDaTv(s) {
   };
 }
 
-async function lerSnapshot(contrato) {
-  const r = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(CHAVES[contrato])}`, {
-    headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
-  });
-  if (!r.ok) throw new Error(`Upstash respondeu ${r.status}.`);
-  const { result } = await r.json();
-  return result ? snapshotDaTv(JSON.parse(result)) : null;
-}
-
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
 
@@ -104,7 +92,8 @@ export default async function handler(req, res) {
     if (!CHAVES[tv.contrato]) {
       return res.status(400).json({ erro: "Contrato inválido." });
     }
-    const snapshot = await lerSnapshot(tv.contrato);
+    const completo = await lerSnapshot(tv.contrato);
+    const snapshot = completo ? snapshotDaTv(completo) : null;
     return res.status(200).json({
       status: "aprovado",
       tv: { nome: tv.nome, contrato: tv.contrato, config: tv.config || {} },

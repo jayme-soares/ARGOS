@@ -2,15 +2,25 @@
 
 Cada monitor atualiza a sua seção ("programaveis" / "campo") e o status no
 snapshot do contrato; a cada atualização o snapshot inteiro é gravado em
-DATA_DIR/<subpasta do contrato>snapshot.json e publicado no Upstash Redis
-(chave Contrato.snapshot_key), de onde a função web/api/snapshot.js lê. A
-VPS não precisa expor porta nenhuma.
+DATA_DIR/<subpasta do contrato>snapshot.json e publicado no Upstash Redis,
+de onde as funções web/api/snapshot.js e tv.js leem (via web/api/_snapshot.js).
+A VPS não precisa expor porta nenhuma.
+
+No Upstash o snapshot fica em duas chaves, as duas em gzip+base64 ("gz:..."),
+para caber na banda do plano gratuito (10 GB/mês):
+  <snapshot_key>        tudo menos o campo, com "campo_hash" (muda a cada minuto, ~3 KB)
+  <snapshot_key>:campo  "<hash>:gz:..." com a seção campo (~250 KB na Negociação)
+O campo só muda a cada exportação (30 min), então só é regravado quando muda;
+antes o snapshot inteiro (2 MB) ia a cada minuto e estourou a banda.
 
 A cópia local também serve para, depois de um restart, o painel não ficar
 vazio até a próxima exportação de campo (que pode levar até 30 min).
 """
 
+import base64
 import copy
+import gzip
+import hashlib
 import json
 import threading
 from datetime import datetime
@@ -52,6 +62,17 @@ def _snapshot_vazio(contrato: Contrato) -> dict:
 
 _snapshots = {c.id: _snapshot_vazio(c) for c in TODOS}
 _ultimo_erro_upstash: dict[str, str | None] = {}
+# Hash do campo já gravado no Upstash, por contrato (None = ainda não gravado
+# nesta execução, então a primeira publicação depois de um restart regrava).
+_campo_publicado: dict[str, str | None] = {}
+
+
+def _comprimir(texto: str) -> str:
+    return "gz:" + base64.b64encode(gzip.compress(texto.encode("utf-8"), 6)).decode("ascii")
+
+
+def chave_campo(contrato: Contrato) -> str:
+    return f"{contrato.snapshot_key}:campo"
 
 
 def agora_iso() -> str:
@@ -109,7 +130,6 @@ def publicar(contrato: Contrato = SOC):
     with _lock:
         snapshot = _snapshots[contrato.id]
         snapshot["gerado_em"] = agora_iso()
-        corpo = json.dumps(snapshot, ensure_ascii=False)
         dados = copy.deepcopy(snapshot)
 
     try:
@@ -119,15 +139,30 @@ def publicar(contrato: Contrato = SOC):
 
     if not (config.UPSTASH_REDIS_REST_URL and config.UPSTASH_REDIS_REST_TOKEN):
         return
+
+    campo_json = json.dumps(dados.pop("campo"), ensure_ascii=False, sort_keys=True)
+    campo_hash = hashlib.sha1(campo_json.encode("utf-8")).hexdigest()[:16]
+    dados["campo_hash"] = campo_hash
+    comandos = []
+    if _campo_publicado.get(contrato.id) != campo_hash:
+        # O campo vai antes: quem ler a chave principal já com o hash novo
+        # encontra o campo novo.
+        comandos.append(["SET", chave_campo(contrato), f"{campo_hash}:{_comprimir(campo_json)}"])
+    comandos.append(["SET", contrato.snapshot_key, _comprimir(json.dumps(dados, ensure_ascii=False))])
+
     try:
-        # API REST do Upstash: o corpo é o comando Redis como array JSON.
+        # API REST do Upstash: /pipeline recebe uma lista de comandos Redis.
         resp = requests.post(
-            config.UPSTASH_REDIS_REST_URL,
+            f"{config.UPSTASH_REDIS_REST_URL.rstrip('/')}/pipeline",
             headers={"Authorization": f"Bearer {config.UPSTASH_REDIS_REST_TOKEN}"},
-            json=["SET", contrato.snapshot_key, corpo],
-            timeout=10,
+            json=comandos,
+            timeout=15,
         )
         resp.raise_for_status()
+        erros = [r["error"] for r in resp.json() if isinstance(r, dict) and r.get("error")]
+        if erros:
+            raise RuntimeError("; ".join(erros))
+        _campo_publicado[contrato.id] = campo_hash
         if _ultimo_erro_upstash.get(contrato.id):
             log(f"Publicação no Upstash ({contrato.nome}) voltou a funcionar.", "SNAPSHOT")
         _ultimo_erro_upstash[contrato.id] = None

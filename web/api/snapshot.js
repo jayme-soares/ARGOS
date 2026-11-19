@@ -5,9 +5,7 @@
 // Um snapshot por contrato (?contrato=soc|negociacao). A gestão só lê os
 // contratos liberados para ela (o administrador geral lê todos); a equipe lê
 // sempre o do próprio contrato, já filtrado pela equipe.
-const KEY = process.env.ARGOS_SNAPSHOT_KEY || "argos:snapshot";
-// Iguais a Contrato.snapshot_key em argos/contratos.py.
-const CHAVES = { soc: KEY, negociacao: `${KEY}:negociacao` };
+import { CHAVES, lerSnapshot } from "./_snapshot.js";
 
 const normalizarEquipe = (e) => String(e || "").replace(/\s+/g, "").toUpperCase();
 // Igual a argos_contratos_efetivos() no banco.
@@ -97,21 +95,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const r = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(CHAVES[contrato])}`, {
-      headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
-    });
-    if (!r.ok) {
-      return res.status(502).json({ erro: `Upstash respondeu ${r.status}.` });
-    }
-    const { result } = await r.json();
-    if (!result) {
+    const snapshot = await lerSnapshot(contrato);
+    if (!snapshot) {
       return res.status(404).json({ erro: "O bot ainda não publicou nenhum dado." });
     }
     res.setHeader("Content-Type", "application/json; charset=utf-8");
-    if (ehEquipe) {
-      return res.status(200).send(JSON.stringify(snapshotDaEquipe(JSON.parse(result), normalizarEquipe(acesso.equipe))));
-    }
-    return res.status(200).send(result);
+    const corpo = ehEquipe ? snapshotDaEquipe(snapshot, normalizarEquipe(acesso.equipe)) : snapshot;
+    return res.status(200).send(JSON.stringify(corpo));
   } catch (e) {
     return res.status(502).json({ erro: `Falha ao ler o Upstash: ${e.message}` });
   }

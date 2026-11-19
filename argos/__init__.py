@@ -8,6 +8,6 @@ Dois monitores rodam em paralelo, cada um com seu próprio Chrome:
   cada ordem em aberto e avisa por push quando uma ordem se aproxima do
   vencimento ou vence sem ser finalizada.
 
-Os dois publicam um snapshot JSON no Upstash Redis, que o painel web (pasta
+Os dois publicam um snapshot JSON (comprimido) no Upstash Redis, que o painel web (pasta
 web/, hospedado no Vercel) lê para montar a tabela.
 """
