@@ -11,6 +11,11 @@
 // painéis que perguntarem nesse intervalo dividem uma leitura) e o campo
 // enquanto o hash dele não mudar. No Vercel a mesma instância atende muitas
 // requisições seguidas, então o campo sai do Upstash ~1 vez por exportação.
+//
+// Reserva: o bot grava as mesmas chaves na tabela argos_snapshot do Supabase
+// (migração 007). Se o Upstash falhar (ex.: 403 por estourar a banda) ou não
+// tiver a chave, a leitura vai ao Supabase, e o Upstash fica de lado por
+// UPSTASH_PAUSA_MS antes de tentar de novo.
 import { gunzipSync } from "node:zlib";
 
 const KEY = process.env.ARGOS_SNAPSHOT_KEY || "argos:snapshot";
@@ -28,12 +33,49 @@ function decodificar(valor) {
   return JSON.parse(valor);
 }
 
-async function get(chave) {
+const UPSTASH_PAUSA_MS = 5 * 60_000;
+let upstashForaAte = 0;
+
+async function getUpstash(chave) {
   const r = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/${encodeURIComponent(chave)}`, {
     headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
   });
   if (!r.ok) throw new Error(`Upstash respondeu ${r.status}.`);
   return (await r.json()).result;
+}
+
+async function getSupabase(chave) {
+  const k = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const r = await fetch(
+    `${process.env.SUPABASE_URL}/rest/v1/argos_snapshot?select=valor&chave=eq.${encodeURIComponent(chave)}`,
+    { headers: { apikey: k, Authorization: `Bearer ${k}` } },
+  );
+  if (!r.ok) throw new Error(`Supabase respondeu ${r.status}.`);
+  const linhas = await r.json();
+  return linhas[0]?.valor ?? null;
+}
+
+async function get(chave) {
+  const temUpstash = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN;
+  const temReserva = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY;
+  let erroUpstash = null;
+  if (temUpstash && (!temReserva || Date.now() >= upstashForaAte)) {
+    try {
+      const valor = await getUpstash(chave);
+      if (valor || !temReserva) return valor;
+    } catch (e) {
+      if (!temReserva) throw e;
+      erroUpstash = e;
+      upstashForaAte = Date.now() + UPSTASH_PAUSA_MS;
+      console.warn(`Upstash falhou (${e.message}); lendo a reserva no Supabase.`);
+    }
+  }
+  if (!temReserva) throw new Error("Upstash não configurado.");
+  try {
+    return await getSupabase(chave);
+  } catch (e) {
+    throw new Error(erroUpstash ? `${erroUpstash.message} Reserva: ${e.message}` : e.message);
+  }
 }
 
 async function lerCampo(contrato, hash) {

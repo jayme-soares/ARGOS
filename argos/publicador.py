@@ -13,6 +13,10 @@ para caber na banda do plano gratuito (10 GB/mês):
 O campo só muda a cada exportação (30 min), então só é regravado quando muda;
 antes o snapshot inteiro (2 MB) ia a cada minuto e estourou a banda.
 
+As mesmas chaves vão também para a tabela argos_snapshot do Supabase
+(migração 007), como reserva: se o Upstash falhar, o painel lê de lá. Cada
+destino falha sozinho, sem atrapalhar o outro.
+
 A cópia local também serve para, depois de um restart, o painel não ficar
 vazio até a próxima exportação de campo (que pode levar até 30 min).
 """
@@ -61,10 +65,11 @@ def _snapshot_vazio(contrato: Contrato) -> dict:
 
 
 _snapshots = {c.id: _snapshot_vazio(c) for c in TODOS}
-_ultimo_erro_upstash: dict[str, str | None] = {}
-# Hash do campo já gravado no Upstash, por contrato (None = ainda não gravado
-# nesta execução, então a primeira publicação depois de um restart regrava).
-_campo_publicado: dict[str, str | None] = {}
+# Por destino ("Upstash" / "Supabase") e contrato: último erro (para logar só
+# quando muda) e hash do campo já gravado (ausente = ainda não gravado nesta
+# execução, então a primeira publicação depois de um restart regrava).
+_ultimo_erro: dict[tuple[str, str], str | None] = {}
+_campo_publicado: dict[tuple[str, str], str] = {}
 
 
 def _comprimir(texto: str) -> str:
@@ -137,39 +142,65 @@ def publicar(contrato: Contrato = SOC):
     except Exception as e:
         log(f"Falha ao salvar snapshot local ({contrato.nome}): {e}", "SNAPSHOT")
 
-    if not (config.UPSTASH_REDIS_REST_URL and config.UPSTASH_REDIS_REST_TOKEN):
-        return
-
     campo_json = json.dumps(dados.pop("campo"), ensure_ascii=False, sort_keys=True)
     campo_hash = hashlib.sha1(campo_json.encode("utf-8")).hexdigest()[:16]
     dados["campo_hash"] = campo_hash
-    comandos = []
-    if _campo_publicado.get(contrato.id) != campo_hash:
+    principal = _comprimir(json.dumps(dados, ensure_ascii=False))
+    campo = None  # comprimido só se algum destino precisar
+
+    for destino, gravar in _destinos():
+        itens = {}
         # O campo vai antes: quem ler a chave principal já com o hash novo
         # encontra o campo novo.
-        comandos.append(["SET", chave_campo(contrato), f"{campo_hash}:{_comprimir(campo_json)}"])
-    comandos.append(["SET", contrato.snapshot_key, _comprimir(json.dumps(dados, ensure_ascii=False))])
+        if _campo_publicado.get((destino, contrato.id)) != campo_hash:
+            campo = campo or f"{campo_hash}:{_comprimir(campo_json)}"
+            itens[chave_campo(contrato)] = campo
+        itens[contrato.snapshot_key] = principal
+        chave = (destino, contrato.id)
+        try:
+            gravar(itens)
+            _campo_publicado[chave] = campo_hash
+            if _ultimo_erro.get(chave):
+                log(f"Publicação no {destino} ({contrato.nome}) voltou a funcionar.", "SNAPSHOT")
+            _ultimo_erro[chave] = None
+        except Exception as e:
+            # Loga só quando o erro muda, para não poluir o log a cada minuto
+            # enquanto o destino estiver fora.
+            msg = str(e)
+            if msg != _ultimo_erro.get(chave):
+                log(f"Falha ao publicar snapshot ({contrato.nome}) no {destino}: {msg}", "SNAPSHOT")
+            _ultimo_erro[chave] = msg
 
-    try:
-        # API REST do Upstash: /pipeline recebe uma lista de comandos Redis.
-        resp = requests.post(
-            f"{config.UPSTASH_REDIS_REST_URL.rstrip('/')}/pipeline",
-            headers={"Authorization": f"Bearer {config.UPSTASH_REDIS_REST_TOKEN}"},
-            json=comandos,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        erros = [r["error"] for r in resp.json() if isinstance(r, dict) and r.get("error")]
-        if erros:
-            raise RuntimeError("; ".join(erros))
-        _campo_publicado[contrato.id] = campo_hash
-        if _ultimo_erro_upstash.get(contrato.id):
-            log(f"Publicação no Upstash ({contrato.nome}) voltou a funcionar.", "SNAPSHOT")
-        _ultimo_erro_upstash[contrato.id] = None
-    except Exception as e:
-        # Loga só quando o erro muda, para não poluir o log a cada minuto
-        # enquanto o Upstash estiver fora.
-        msg = str(e)
-        if msg != _ultimo_erro_upstash.get(contrato.id):
-            log(f"Falha ao publicar snapshot ({contrato.nome}) no Upstash: {msg}", "SNAPSHOT")
-        _ultimo_erro_upstash[contrato.id] = msg
+
+def _destinos():
+    destinos = []
+    if config.UPSTASH_REDIS_REST_URL and config.UPSTASH_REDIS_REST_TOKEN:
+        destinos.append(("Upstash", _gravar_upstash))
+    if config.SUPABASE_URL and config.SUPABASE_ANON_KEY and config.PUSH_CHAVE:
+        destinos.append(("Supabase", _gravar_supabase))
+    return destinos
+
+
+def _gravar_upstash(itens: dict[str, str]):
+    # API REST do Upstash: /pipeline recebe uma lista de comandos Redis.
+    resp = requests.post(
+        f"{config.UPSTASH_REDIS_REST_URL.rstrip('/')}/pipeline",
+        headers={"Authorization": f"Bearer {config.UPSTASH_REDIS_REST_TOKEN}"},
+        json=[["SET", k, v] for k, v in itens.items()],
+        timeout=15,
+    )
+    resp.raise_for_status()
+    erros = [r["error"] for r in resp.json() if isinstance(r, dict) and r.get("error")]
+    if erros:
+        raise RuntimeError("; ".join(erros))
+
+
+def _gravar_supabase(itens: dict[str, str]):
+    resp = requests.post(
+        f"{config.SUPABASE_URL.rstrip('/')}/rest/v1/rpc/argos_snapshot_gravar",
+        headers={"apikey": config.SUPABASE_ANON_KEY, "Authorization": f"Bearer {config.SUPABASE_ANON_KEY}"},
+        json={"p_chave": config.PUSH_CHAVE, "p_itens": itens},
+        timeout=15,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"{resp.status_code}: {resp.text[:200]}")

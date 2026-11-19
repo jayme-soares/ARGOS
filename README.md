@@ -129,6 +129,16 @@ Diagnóstico:
    - Na VPS (`.env`): `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN`. É o token de escrita.
    - No Vercel: as mesmas variáveis. Aqui pode ser o **read-only token**.
 
+O snapshot vai comprimido e dividido em duas chaves, e o campo só é regravado quando muda (ver `argos/publicador.py`). Assim o consumo cabe nos 10 GB/mês do plano gratuito.
+
+### Reserva no Supabase
+
+O bot grava as mesmas chaves também na tabela `argos_snapshot` do Supabase. Se o Upstash falhar (por exemplo, `403` por ter estourado a banda), o painel e as TVs leem de lá automaticamente e voltam ao Upstash sozinhos depois.
+
+1. No SQL Editor do Supabase, rode [`supabase/migrations/007_argos_snapshot.sql`](supabase/migrations/007_argos_snapshot.sql), depois da 002.
+2. Nenhuma variável nova: o bot usa `SUPABASE_URL`, `SUPABASE_ANON_KEY` e `ARGOS_PUSH_CHAVE`, e o Vercel usa a `SUPABASE_SERVICE_ROLE_KEY`, que já existem.
+3. Atualize o bot (`docker compose up -d --build`). No log, `Falha ao publicar snapshot (...) no Supabase` significa que a migração ainda não foi rodada.
+
 ## Acesso ao painel (Supabase)
 
 O login usa o Supabase Auth da empresa (email e senha). Quem já tem conta entra direto; quem não tem pode se cadastrar pela própria tela de login ("Não tem conta? Cadastre-se"). Em qualquer caso, o acesso ao ARGOS é controlado pela tabela `public.argos_acessos`:
