@@ -356,7 +356,13 @@ _JS_TABELA_LISTA = """
 def _clicar_sem_esperar(driver, el):
     """Clique que não prende o Selenium: o eOrder redesenha a lista dentro
     do próprio clique e o comando estouraria o timeout de leitura."""
-    driver.execute_script("const e = arguments[0]; setTimeout(() => e.click(), 0);", el)
+    # O atraso deixa a resposta deste comando sair antes do clique travar a
+    # página; se mesmo assim o comando estourar, o clique já foi agendado e
+    # quem confere se a lista chegou é _esperar_lista_carregar.
+    try:
+        driver.execute_script("const e = arguments[0]; setTimeout(() => e.click(), 500);", el)
+    except Exception as e:
+        log(f"Clique agendado, mas o navegador demorou a responder ({str(e).splitlines()[0]}).", PREFIXO_LOG)
 
 
 def _marcar_lista_atual(driver):

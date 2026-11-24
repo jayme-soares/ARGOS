@@ -19,6 +19,7 @@ a própria sessão (que o login do monitor de campo invalidou) e reloga.
 import contextlib
 import functools
 import threading
+import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -511,6 +512,7 @@ class MonitorCampo(threading.Thread):
         except Exception as e:
             self.proxima_extracao = _agora() + timedelta(minutes=config.RETENTATIVA_CAMPO_MINUTOS)
             log(f"ERRO na exportação: {e}. Nova tentativa às {self.proxima_extracao:%H:%M}.", self.PREFIXO)
+            log("Traceback:\n" + traceback.format_exc(), self.PREFIXO)
             self._status(f"erro: {e}")
             return
 
