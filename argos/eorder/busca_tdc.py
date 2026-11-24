@@ -372,6 +372,17 @@ def _marcar_lista_atual(driver):
         pass
 
 
+def _pagina_de_erro_do_servidor(driver) -> bool:
+    """O balanceador do eOrder às vezes desiste da lista enorme e troca a
+    tela por "Failure of Web Server bridge": a sessão fica parada ali."""
+    try:
+        return bool(driver.execute_script(
+            "return !!document.body && document.body.innerText.includes('Failure of Web Server bridge');"
+        ))
+    except Exception:
+        return False
+
+
 def _esperar_lista_carregar(driver, progresso=_nada, timeout=ATUALIZAR_LISTA_TIMEOUT) -> bool:
     """Espera a tabela da lista (nova, sem a marca da anterior) aparecer com
     linhas. Enquanto o eOrder redesenha, o navegador não responde: os erros
@@ -388,6 +399,9 @@ def _esperar_lista_carregar(driver, progresso=_nada, timeout=ATUALIZAR_LISTA_TIM
                 return True
         except Exception:
             pass
+        if _pagina_de_erro_do_servidor(driver):
+            log("O eOrder respondeu 'Failure of Web Server bridge' ao carregar a lista.", PREFIXO_LOG)
+            return False
         time.sleep(3)
     log(f"A Lista de exportação não terminou de carregar em {timeout}s; seguindo.", PREFIXO_LOG)
     return False
@@ -395,17 +409,25 @@ def _esperar_lista_carregar(driver, progresso=_nada, timeout=ATUALIZAR_LISTA_TIM
 
 def _atualizar_lista_exportacao(driver, progresso=_nada):
     """Atualiza pela própria tela: ⋮ > "Atualizar", e espera a lista nova
-    carregar. Não reabre pelo menu lateral."""
+    carregar. Se a tela se perdeu (página de erro do servidor, menu que não
+    volta), reloga e reabre a lista, que também traz a versão nova."""
     try:
+        if _pagina_de_erro_do_servidor(driver):
+            raise TimeoutException("página de erro do servidor do eOrder")
         progresso("atualizando_lista_exportacao")
-        menu = encontrar_elemento_visivel(driver, By.XPATH, XPATHS_MENU_OPCOES_LISTA_EXPORTACAO[0],
-                                          timeout=ATUALIZAR_LISTA_TIMEOUT)
+        # A lista já terminou de carregar (_esperar_lista_carregar): o menu
+        # que não aparece em 2 min é tela perdida, não lentidão.
+        menu = encontrar_elemento_visivel(driver, By.XPATH, XPATHS_MENU_OPCOES_LISTA_EXPORTACAO[0], timeout=120)
         _clicar_sem_esperar(driver, menu)
         progresso("atualizando_lista_exportacao")
         atualizar = encontrar_elemento_visivel(driver, By.XPATH, XPATH_ATUALIZAR, timeout=60)
-    except TimeoutException:
+    except TimeoutException as e:
         debug_screenshot(driver, "lista_exportacao_nao_atualizou")
-        raise
+        log(f"Não deu para atualizar a lista ({str(e).splitlines()[0]}); relogando e reabrindo.", PREFIXO_LOG)
+        from argos.eorder.sessao import login
+        login(driver)
+        abrir_lista_exportacao(driver, progresso)
+        return
     _marcar_lista_atual(driver)
     _clicar_sem_esperar(driver, atualizar)
     time.sleep(2)
