@@ -307,10 +307,11 @@ def selecionar_co(driver, co_nome: str):
         raise
 
 
-def abrir_lista_exportacao(driver):
+def abrir_lista_exportacao(driver, progresso=_nada):
     try:
         _clicar_item_lista_tdc(driver, XPATH_LISTA_EXPORTACAO)
         time.sleep(3)
+        _esperar_lista_carregar(driver, progresso)
     except Exception:
         debug_screenshot(driver, "lista_exportacao_nao_abriu")
         raise
@@ -332,20 +333,66 @@ def _esperar(segundos: float, progresso=_nada):
         time.sleep(min(15, max(0, fim - time.time())))
 
 
+# A tabela visível da Lista de exportação (a da coluna "Data Criação"). Ao
+# atualizar, o eOrder troca a tabela inteira; a antiga fica marcada para
+# saber quando a nova terminou de chegar.
+_JS_TABELA_LISTA = """
+    return [...document.querySelectorAll('table.tvGrid')].find(t => t.offsetParent
+        && [...t.querySelectorAll('th')].some(h => h.textContent.includes('Data Cria'))) || null;
+"""
+
+
+def _clicar_sem_esperar(driver, el):
+    """Clique que não prende o Selenium: o eOrder redesenha a lista dentro
+    do próprio clique e o comando estouraria o timeout de leitura."""
+    driver.execute_script("const e = arguments[0]; setTimeout(() => e.click(), 0);", el)
+
+
+def _marcar_lista_atual(driver):
+    try:
+        driver.execute_script("const t = (function(){" + _JS_TABELA_LISTA + "})(); if (t) t.argosAntiga = true;")
+    except Exception:
+        pass
+
+
+def _esperar_lista_carregar(driver, progresso=_nada, timeout=ATUALIZAR_LISTA_TIMEOUT) -> bool:
+    """Espera a tabela da lista (nova, sem a marca da anterior) aparecer com
+    linhas. Enquanto o eOrder redesenha, o navegador não responde: os erros
+    de comando são só espera."""
+    fim = time.time() + timeout
+    while time.time() < fim:
+        progresso("carregando_lista_exportacao")
+        try:
+            pronta = driver.execute_script(
+                "const t = (function(){" + _JS_TABELA_LISTA + "})();"
+                "return !!t && !t.argosAntiga && t.querySelectorAll('tr.tvRow').length > 0;"
+            )
+            if pronta:
+                return True
+        except Exception:
+            pass
+        time.sleep(3)
+    log(f"A Lista de exportação não terminou de carregar em {timeout}s; seguindo.", PREFIXO_LOG)
+    return False
+
+
 def _atualizar_lista_exportacao(driver, progresso=_nada):
-    """Atualiza pela própria tela: ⋮ > "Atualizar", esperando o tempo que o
-    eOrder levar para devolver o menu. Não reabre pelo menu lateral: o
-    submenu "Lista TdC" fica fechado e clicar nele no meio do carregamento
-    só piora."""
+    """Atualiza pela própria tela: ⋮ > "Atualizar", e espera a lista nova
+    carregar. Não reabre pelo menu lateral."""
     try:
         progresso("atualizando_lista_exportacao")
-        clicar_primeiro_disponivel(driver, XPATHS_MENU_OPCOES_LISTA_EXPORTACAO,
-                                   timeout=ATUALIZAR_LISTA_TIMEOUT, via_js=True)
+        menu = encontrar_elemento_visivel(driver, By.XPATH, XPATHS_MENU_OPCOES_LISTA_EXPORTACAO[0],
+                                          timeout=ATUALIZAR_LISTA_TIMEOUT)
+        _clicar_sem_esperar(driver, menu)
         progresso("atualizando_lista_exportacao")
-        esperar_e_clicar_visivel(driver, XPATH_ATUALIZAR, timeout=ATUALIZAR_LISTA_TIMEOUT, via_js=True)
+        atualizar = encontrar_elemento_visivel(driver, By.XPATH, XPATH_ATUALIZAR, timeout=60)
     except TimeoutException:
         debug_screenshot(driver, "lista_exportacao_nao_atualizou")
         raise
+    _marcar_lista_atual(driver)
+    _clicar_sem_esperar(driver, atualizar)
+    time.sleep(2)
+    _esperar_lista_carregar(driver, progresso)
 
 
 def _arquivos_prontos(pasta: Path, antes: set[str]) -> list[Path]:
@@ -506,7 +553,7 @@ def exportar_cos(driver, cos: list[str], progresso=_nada, pasta: Path | None = N
     while not _LOCK_LISTA_EXPORTACAO.acquire(timeout=15):
         progresso("aguardando_lista_exportacao")
     try:
-        abrir_lista_exportacao(driver)
+        abrir_lista_exportacao(driver, progresso)
         pedidos = list(nomes.values())
         for i, (co, nome) in enumerate(nomes.items()):
             try:
