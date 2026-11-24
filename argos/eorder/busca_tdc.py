@@ -315,15 +315,25 @@ def abrir_lista_exportacao(driver):
         raise
 
 
-def _atualizar_lista_exportacao(driver):
+# A Lista de exportação acumula o mês inteiro (milhares de linhas) e o eOrder
+# leva minutos para redesenhá-la; enquanto isso o navegador não responde.
+ATUALIZAR_LISTA_TIMEOUT = 5 * 60
+
+
+def _atualizar_lista_exportacao(driver, progresso=_nada):
+    """Atualiza pela própria tela: ⋮ > "Atualizar", esperando o tempo que o
+    eOrder levar para devolver o menu. Não reabre pelo menu lateral: o
+    submenu "Lista TdC" fica fechado e clicar nele no meio do carregamento
+    só piora."""
     try:
-        clicar_primeiro_disponivel(driver, XPATHS_MENU_OPCOES_LISTA_EXPORTACAO, timeout=10)
-        time.sleep(1)
-        esperar_e_clicar_visivel(driver, XPATH_ATUALIZAR, timeout=10)
+        progresso("atualizando_lista_exportacao")
+        clicar_primeiro_disponivel(driver, XPATHS_MENU_OPCOES_LISTA_EXPORTACAO,
+                                   timeout=ATUALIZAR_LISTA_TIMEOUT, via_js=True)
+        progresso("atualizando_lista_exportacao")
+        esperar_e_clicar_visivel(driver, XPATH_ATUALIZAR, timeout=ATUALIZAR_LISTA_TIMEOUT, via_js=True)
     except TimeoutException:
-        # Se o menu sumiu (painel fechou), reabrir a lista também atualiza.
-        _esc(driver)
-        abrir_lista_exportacao(driver)
+        debug_screenshot(driver, "lista_exportacao_nao_atualizou")
+        raise
 
 
 def _arquivos_prontos(pasta: Path, antes: set[str]) -> list[Path]:
@@ -413,7 +423,7 @@ def baixar_exportacao(driver, nome_exportacao: str, progresso=_nada, pasta: Path
             log(f"Exportação ainda não disponível; nova verificação em {config.EXPORTACAO_POLLING_SEGUNDOS}s.", prefixo)
 
         time.sleep(config.EXPORTACAO_POLLING_SEGUNDOS)
-        _atualizar_lista_exportacao(driver)
+        _atualizar_lista_exportacao(driver, progresso)
 
     debug_screenshot(driver, "exportacao_timeout")
     raise TimeoutError(
