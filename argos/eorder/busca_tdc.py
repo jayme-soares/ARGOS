@@ -308,8 +308,19 @@ def selecionar_co(driver, co_nome: str):
 
 
 def abrir_lista_exportacao(driver, progresso=_nada):
+    """Um clique só em "Lista Exportação TdC", sem esperar a resposta: o
+    eOrder redesenha a lista (milhares de linhas) dentro do clique, o
+    Selenium recebe erro mesmo com a lista abrindo, e repetir o caminho
+    clicando em "Lista TdC" fecharia o submenu."""
     try:
-        _clicar_item_lista_tdc(driver, XPATH_LISTA_EXPORTACAO)
+        try:
+            item = encontrar_elemento_visivel(driver, By.XPATH, XPATH_LISTA_EXPORTACAO, timeout=3)
+        except TimeoutException:
+            clicar_primeiro_disponivel(driver, XPATHS_MENU_LISTA_TDC, timeout=45)
+            time.sleep(2)
+            item = encontrar_elemento_visivel(driver, By.XPATH, XPATH_LISTA_EXPORTACAO, timeout=45)
+        _marcar_lista_atual(driver)
+        _clicar_sem_esperar(driver, item)
         time.sleep(3)
         _esperar_lista_carregar(driver, progresso)
     except Exception:
