@@ -126,6 +126,10 @@ EXPORTACAO_POLLING_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_POLLING_SEG", 30)
 # pedidas depois já estão na lista há esse tempo e esta não, desiste dela
 # (em vez de segurar o ciclo pelo EXPORTACAO_TIMEOUT_SEGUNDOS inteiro).
 EXPORTACAO_PERDIDA_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_PERDIDA_SEG", 180)
+# Espera antes de abrir a Lista de exportação, para a última exportação pedida
+# já estar pronta no primeiro carregamento: a lista acumula o mês inteiro e
+# cada carga/"Atualizar" leva minutos.
+EXPORTACAO_ESPERA_INICIAL_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_ESPERA_INICIAL_SEG", 90)
 # Atraso da primeira exportação de campo dos contratos além da SOC, para os
 # picos (login + exportações) não coincidirem com os da SOC. Os ciclos
 # seguintes contam do início do anterior, então o desencontro se mantém.

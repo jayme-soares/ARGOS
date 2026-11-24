@@ -23,6 +23,7 @@ Uso avulso (descoberta/diagnóstico, de preferência com ARGOS_HEADLESS=0):
     python -m argos.eorder.busca_tdc --arquivo X              # só lê uma planilha já baixada
 """
 
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -318,6 +319,17 @@ def abrir_lista_exportacao(driver):
 # A Lista de exportação acumula o mês inteiro (milhares de linhas) e o eOrder
 # leva minutos para redesenhá-la; enquanto isso o navegador não responde.
 ATUALIZAR_LISTA_TIMEOUT = 5 * 60
+# Os monitores de campo (SOC e Negociação) revezam a Lista de exportação:
+# os dois Chromes desenhando a lista ao mesmo tempo esgotam a CPU da VPS e
+# nenhum responde.
+_LOCK_LISTA_EXPORTACAO = threading.Lock()
+
+
+def _esperar(segundos: float, progresso=_nada):
+    fim = time.time() + segundos
+    while time.time() < fim:
+        progresso("aguardando_exportacao")
+        time.sleep(min(15, max(0, fim - time.time())))
 
 
 def _atualizar_lista_exportacao(driver, progresso=_nada):
@@ -486,20 +498,27 @@ def exportar_cos(driver, cos: list[str], progresso=_nada, pasta: Path | None = N
             resultado[co] = e
             log(f"ERRO ao pedir a exportação de {co}: {str(e).splitlines()[0]}", prefixo)
 
-    if nomes:
-        if len(cos) > 1:
-            login(driver)
+    if not nomes:
+        return resultado
+    if len(cos) > 1:
+        login(driver)
+    _esperar(config.EXPORTACAO_ESPERA_INICIAL_SEGUNDOS, progresso)
+    while not _LOCK_LISTA_EXPORTACAO.acquire(timeout=15):
+        progresso("aguardando_lista_exportacao")
+    try:
         abrir_lista_exportacao(driver)
-    pedidos = list(nomes.values())
-    for i, (co, nome) in enumerate(nomes.items()):
-        try:
-            arquivo = baixar_exportacao(driver, nome, progresso=progresso, pasta=pasta, prefixo=prefixo,
-                                        posteriores=pedidos[i + 1:])
-            log(f"Planilha de {co} baixada: {arquivo.name} ({arquivo.stat().st_size} bytes)", prefixo)
-            resultado[co] = arquivo
-        except Exception as e:
-            resultado[co] = e
-            log(f"ERRO ao baixar a exportação de {co}: {str(e).splitlines()[0]}", prefixo)
+        pedidos = list(nomes.values())
+        for i, (co, nome) in enumerate(nomes.items()):
+            try:
+                arquivo = baixar_exportacao(driver, nome, progresso=progresso, pasta=pasta, prefixo=prefixo,
+                                            posteriores=pedidos[i + 1:])
+                log(f"Planilha de {co} baixada: {arquivo.name} ({arquivo.stat().st_size} bytes)", prefixo)
+                resultado[co] = arquivo
+            except Exception as e:
+                resultado[co] = e
+                log(f"ERRO ao baixar a exportação de {co}: {str(e).splitlines()[0]}", prefixo)
+    finally:
+        _LOCK_LISTA_EXPORTACAO.release()
     return resultado
 
 
