@@ -134,6 +134,11 @@ EXPORTACAO_ESPERA_INICIAL_SEGUNDOS = _env_int("ARGOS_EXPORTACAO_ESPERA_INICIAL_S
 # picos (login + exportações) não coincidirem com os da SOC. Os ciclos
 # seguintes contam do início do anterior, então o desencontro se mantém.
 DEFASAGEM_CAMPO_MINUTOS = _env_int("ARGOS_DEFASAGEM_CAMPO_MIN", 15)
+# Os ciclos de campo rodam um de cada vez e a SOC (1 planilha) passa na
+# frente da Negociação (11): com a SOC na hora ou com a última tentativa
+# falhada, a Negociação não começa. Se a SOC continuar falhando, a
+# Negociação espera no máximo esse tempo e roda mesmo assim.
+ESPERA_MAX_PRIORIDADE_CAMPO_MINUTOS = _env_int("ARGOS_ESPERA_MAX_SOC_MIN", 30)
 
 # --- Contratos (ver argos/contratos.py) ---
 # CO da SOC no combo da Busca TdC (o filtro salvo traz todos os COs, mas a

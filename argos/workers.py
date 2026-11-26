@@ -19,6 +19,7 @@ a própria sessão (que o login do monitor de campo invalidou) e reloga.
 import contextlib
 import functools
 import threading
+import time
 import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -73,6 +74,67 @@ def _acesso_eorder(worker: str):
 
 def _agora() -> datetime:
     return datetime.now(config.TIMEZONE)
+
+
+class _VezDoCampo:
+    """Os ciclos de exportação de campo rodam um de cada vez, com a SOC na
+    frente: uma planilha só, que chega ao painel antes das 11 da Negociação.
+    Disputando a Lista de exportação, a SOC chegava a ficar mais de 1h sem
+    dados esperando a Negociação ou estourando o prazo enquanto a lista não
+    abria.
+
+    A SOC fica "pendente" desde a hora da exportação até uma leitura dar
+    certo; enquanto isso a Negociação não começa (no máximo
+    ESPERA_MAX_PRIORIDADE_CAMPO_MINUTOS, para uma SOC falhando sem parar não
+    deixar a Negociação sem dados). Um ciclo já em andamento não é
+    interrompido."""
+
+    def __init__(self):
+        self._cond = threading.Condition()
+        self._ocupado = False
+        self._prioritario_pendente = False
+
+    def marcar_prioritario_pendente(self, pendente: bool):
+        with self._cond:
+            self._prioritario_pendente = pendente
+            self._cond.notify_all()
+
+    def _livre(self, prioritario: bool, espera_desde: float) -> bool:
+        if self._ocupado:
+            return False
+        if prioritario or not self._prioritario_pendente:
+            return True
+        return time.monotonic() - espera_desde >= config.ESPERA_MAX_PRIORIDADE_CAMPO_MINUTOS * 60
+
+    def _pegar(self, prioritario: bool, espera_desde: float) -> bool:
+        if self._livre(prioritario, espera_desde):
+            self._ocupado = True
+            return True
+        return False
+
+    @contextlib.contextmanager
+    def vez(self, worker: str, prioritario: bool, enquanto_espera=lambda: None):
+        """`enquanto_espera()` roda a cada ~30s de espera, fora do lock (o
+        monitor continua reavaliando os alertas dos dados que já tem)."""
+        espera_desde = time.monotonic()
+        while True:
+            with self._cond:
+                if self._pegar(prioritario, espera_desde):
+                    break
+                self._cond.wait(timeout=30)
+                if self._pegar(prioritario, espera_desde):
+                    break
+            saude.bater(worker)
+            enquanto_espera()
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._ocupado = False
+                self._cond.notify_all()
+
+
+VEZ_DO_CAMPO = _VezDoCampo()
 
 
 def _data_eorder_para_iso(texto: str | None) -> str | None:
@@ -503,7 +565,33 @@ class MonitorCampo(threading.Thread):
         )
         return True
 
+    @property
+    def prioritario(self) -> bool:
+        return self.contrato.id == "soc"
+
     def ciclo_exportacao(self):
+        if self.prioritario:
+            VEZ_DO_CAMPO.marcar_prioritario_pendente(True)
+
+        espera = {"avisou": False, "alertas_em": time.monotonic()}
+
+        def enquanto_espera():
+            if not espera["avisou"]:
+                espera["avisou"] = True
+                outro = "a exportação de campo em andamento" if self.prioritario else "a SOC"
+                log(f"Aguardando {outro} terminar para começar.", self.PREFIXO)
+                self._status("aguardando_vez" if self.prioritario else "aguardando_soc")
+            if time.monotonic() - espera["alertas_em"] >= config.REAVALIACAO_ALERTAS_MINUTOS * 60:
+                espera["alertas_em"] = time.monotonic()
+                self.avaliar_alertas()
+
+        with VEZ_DO_CAMPO.vez(self.NOME, self.prioritario, enquanto_espera):
+            ok = self._ciclo_exportacao()
+        if self.prioritario and ok:
+            VEZ_DO_CAMPO.marcar_prioritario_pendente(False)
+
+    def _ciclo_exportacao(self) -> bool:
+        """Retorna True se alguma planilha foi lida e publicada."""
         inicio = _agora()
         log("Iniciando exportação da Busca TdC.", self.PREFIXO)
         try:
@@ -514,7 +602,7 @@ class MonitorCampo(threading.Thread):
             log(f"ERRO na exportação: {e}. Nova tentativa às {self.proxima_extracao:%H:%M}.", self.PREFIXO)
             log("Traceback:\n" + traceback.format_exc(), self.PREFIXO)
             self._status(f"erro: {e}")
-            return
+            return False
 
         agora = _agora()
         d = self.dados
@@ -524,7 +612,7 @@ class MonitorCampo(threading.Thread):
             log(f"Nenhuma planilha lida ({'; '.join(erros) or 'sem detalhe'}). "
                 f"Nova tentativa às {self.proxima_extracao:%H:%M}.", self.PREFIXO)
             self._status("erro: nenhuma planilha lida")
-            return
+            return False
 
         # Um CO falhando de vez não pode fazer o ciclo inteiro (11 exportações
         # na Negociação) rodar a cada 5 min: a retentativa curta é só quando
@@ -539,6 +627,7 @@ class MonitorCampo(threading.Thread):
             avisos_equipe.avisar_designacoes(d.registros, d.contrato)
         except Exception as e:
             log(f"ERRO ao avisar designações às equipes ({d.contrato.nome}): {e}", self.PREFIXO)
+        return True
 
     def avaliar_alertas(self):
         agora = _agora()
@@ -566,6 +655,9 @@ class MonitorCampo(threading.Thread):
     def run(self):
         while True:
             if not dentro_da_janela_permitida():
+                if self.prioritario:
+                    # Uma falha da SOC no fim do dia não segura a Negociação amanhã.
+                    VEZ_DO_CAMPO.marcar_prioritario_pendente(False)
                 self._status("fora_do_horario")
                 saude.dormir(self.NOME, config.FORA_DA_JANELA_INTERVALO_SEGUNDOS)
                 continue
